@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QContextMenuEvent, QResizeEvent
+from PySide6.QtGui import QContextMenuEvent
 from PySide6.QtWidgets import QApplication, QMenu
 
 from app.models.metadata.metadata_structure import AboutXmlMod, ModType
@@ -22,7 +22,9 @@ from app.utils.custom_list_widget_item_metadata import CustomListWidgetItemMetad
 from app.views.mods_panel import ModListItemInner, ModListWidget
 
 
-def make_scroll_list(qtbot: Any, count: int, tags: bool) -> ModListWidget:
+def make_scroll_list(
+    qtbot: Any, count: int, tags: bool, mod_tags: list[str] | None = None
+) -> ModListWidget:
     settings = MagicMock(spec=Settings)
     settings.mod_type_filter = False
     settings.show_save_comparison_indicators = False
@@ -59,7 +61,11 @@ def make_scroll_list(qtbot: Any, count: int, tags: bool) -> ModListWidget:
             mismatch=False,
             alternative=False,
             mod_color=None,
-            mod_tags=["framework", "quality of life", "日本語翻訳"],
+            mod_tags=(
+                ["framework", "quality of life", "日本語翻訳"]
+                if mod_tags is None
+                else mod_tags
+            ),
             show_tags=tags,
             list_type="Inactive",
         )
@@ -73,16 +79,40 @@ def make_scroll_list(qtbot: Any, count: int, tags: bool) -> ModListWidget:
 
 
 @pytest.mark.parametrize("tags", [False, True])
-def test_cached_tags_used_when_scrolling(qtbot: Any, tags: bool) -> None:
+@pytest.mark.parametrize("mod_tags", [[], ["日本語翻訳"]])
+def test_cached_tags_used_when_scrolling(
+    qtbot: Any, tags: bool, mod_tags: list[str]
+) -> None:
     with patch("app.views.mods_panel.auxdb_get_mod_tags", return_value=[]) as reads:
-        widget = make_scroll_list(qtbot, 80, tags)
+        widget = make_scroll_list(qtbot, 80, tags, mod_tags)
         for position in (30, 60, 0, 30, 60, 0):
             widget.verticalScrollBar().setValue(position)
             QApplication.processEvents()
         reads.assert_not_called()
         row_widget = widget.itemWidget(widget.item(0))
-        assert row_widget is not None
-        assert "日本語翻訳" in row_widget.toolTip()
+        assert isinstance(row_widget, ModListItemInner)
+        assert ("日本語翻訳" in row_widget.toolTip()) == bool(mod_tags)
+        assert row_widget.mod_tags_label.isHidden() == (not tags or not mod_tags)
+
+
+@pytest.mark.parametrize("replace", [False, True])
+def test_tag_cache_isolated_from_caller_mutation(qtbot: Any, replace: bool) -> None:
+    tags = ["initial"]
+    with patch("app.views.mods_panel.auxdb_get_mod_tags", return_value=[]) as reads:
+        widget = make_scroll_list(qtbot, 1, True, tags)
+        row = widget.itemWidget(widget.item(0))
+        assert isinstance(row, ModListItemInner)
+        if replace:
+            tags = ["replacement"]
+            row.set_tags_visible(True, tags)
+        expected = tags[0]
+        tags.append("uncommitted change")
+        row.set_tags_visible(False)
+        row.set_tags_visible(True)
+        assert row.mod_tags_label.toolTip() == f"[{expected}]"
+        assert f"Tags: {expected}\n" in row.get_tool_tip_text()
+        assert "uncommitted change" not in row.get_tool_tip_text()
+        reads.assert_not_called()
 
 
 def test_tag_edits_refresh_row_and_tooltip(qtbot: Any) -> None:
@@ -109,11 +139,55 @@ def test_unchanged_tags_do_not_restart_layout(qtbot: Any) -> None:
             resize.assert_not_called()
             row.set_tags_visible(False, tags)
             resize.assert_called_once()
-        event = QResizeEvent(row.size(), row.size())
-        row.resizeEvent(event)
+        row._update_text_layout()
         with patch.object(row.main_label, "setText") as set_text:
-            row.resizeEvent(event)
+            row._update_text_layout()
             set_text.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "change", ["width", "row_font", "name_font", "tags_font", "name", "tags", "visible"]
+)
+def test_layout_cache_updates_when_display_changes(qtbot: Any, change: str) -> None:
+    widget = make_scroll_list(qtbot, 1, True)
+    if change == "row_font":
+        # The theme fixes child fonts; clear it to exercise font inheritance.
+        widget.setStyleSheet("")
+        QApplication.processEvents()
+    row = widget.itemWidget(widget.item(0))
+    assert isinstance(row, ModListItemInner)
+    row._update_text_layout()
+    with (
+        patch.object(row.main_label, "setText", wraps=row.main_label.setText) as name,
+        patch.object(
+            row.mod_tags_label, "setText", wraps=row.mod_tags_label.setText
+        ) as tags,
+    ):
+        if change == "width":
+            row.resize(row.width() + 100, row.height())
+        elif change.endswith("font"):
+            font_widget = {
+                "row_font": row,
+                "name_font": row.main_label,
+                "tags_font": row.mod_tags_label,
+            }[change]
+            font = font_widget.font()
+            font.setPointSizeF(font.pointSizeF() + 2)
+            font_widget.setFont(font)
+        elif change == "name":
+            row.list_item_name = "Renamed mod [Folder / Set]"
+        elif change == "tags":
+            row.set_tags_visible(True, ["updated tags"])
+        else:
+            row.set_tags_visible(False)
+        row._update_text_layout()
+        assert name.called
+        assert tags.called
+        name.reset_mock()
+        tags.reset_mock()
+        row._update_text_layout()
+        name.assert_not_called()
+        tags.assert_not_called()
 
 
 def test_collection_labels_refresh_visible_and_lazy_rows(qtbot: Any) -> None:
@@ -142,6 +216,21 @@ def test_collection_labels_refresh_visible_and_lazy_rows(qtbot: Any) -> None:
             assert row.list_item_name == row.base_mod_name
             assert row.main_label.toolTip() == row.base_mod_name
         reads.assert_not_called()
+
+
+def test_name_elision_uses_label_font(qtbot: Any) -> None:
+    widget = make_scroll_list(qtbot, 1, False)
+    row = widget.itemWidget(widget.item(0))
+    assert isinstance(row, ModListItemInner)
+    row.resize(400, row.height())
+    row._update_text_layout()
+    original_text = row.main_label.text()
+    font = row.main_label.font()
+    font.setPointSizeF(36)
+    row.main_label.setFont(font)
+    row._update_text_layout()
+    assert len(row.main_label.text()) < len(original_text)
+    assert row.main_label.text().endswith("…")
 
 
 @pytest.mark.parametrize("divider", [False, True])

@@ -15,7 +15,6 @@ from PySide6.QtCore import (
     QKeyCombination,
     QModelIndex,
     QObject,
-    QRectF,
     QSize,
     Qt,
     QThread,
@@ -31,7 +30,6 @@ from PySide6.QtGui import (
     QDropEvent,
     QEnterEvent,
     QFocusEvent,
-    QFontMetrics,
     QIcon,
     QKeyEvent,
     QKeySequence,
@@ -195,7 +193,7 @@ class ModListItemInner(QWidget):
         # Cache whether tags should be displayed
         self.show_tags = show_tags
         self._tag_display_state: tuple[bool, tuple[str, ...]] | None = None
-        self._text_layout_key: tuple[int, int, bool, str, str, str, str] | None = None
+        self._text_layout_key: tuple[int, str, str, str, str] | None = None
         # Cache the mod color
         self.mod_color: QColor | None = mod_color
 
@@ -204,7 +202,7 @@ class ModListItemInner(QWidget):
         # in this variable. This is exactly equal to the dict value of a
         # single all_mods key-value
         self.path = path
-        self._mod_tags = list(
+        self._mod_tags = tuple(
             mod_tags if mod_tags is not None else auxdb_get_mod_tags(settings, path)
         )
         mod = self.metadata_controller.get_mod(self.path)
@@ -222,7 +220,6 @@ class ModListItemInner(QWidget):
         self.main_item_layout = QHBoxLayout()
         self.main_item_layout.setContentsMargins(0, 0, 0, 0)
         self.main_item_layout.setSpacing(0)
-        self.font_metrics = QFontMetrics(self.font())
 
         # Icons that are conditional
         self.csharp_icon = None
@@ -417,8 +414,7 @@ class ModListItemInner(QWidget):
             )
 
     def _resize_text_after_icon_toggle(self, icon_count: int = -1) -> None:
-        event = QResizeEvent(self.size(), self.size())
-        self.resizeEvent(event, icon_count=icon_count)
+        self._update_text_layout(icon_count)
 
     def update_translation_status(self, is_translated: bool) -> None:
         if is_translated:
@@ -575,94 +571,59 @@ class ModListItemInner(QWidget):
         logger.error(f"No type found for ModListItemInner with package id {package_id}")
         return ModListIcons.local_icon()
 
-    def resizeEvent(self, event: QResizeEvent, icon_count: int = -1) -> None:
-        """
-        When the label is resized (as the window is resized),
-        also elide the label if needed.
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        self._update_text_layout()
+        super().resizeEvent(event)
 
-        :param event: the resize event
-        :param icon_count: int, the number of icons to consider for width calculation. If -1, icon count will be calculated
-        """
-        if icon_count == -1:
-            # Count the number of QLabel widgets with QIcon and calculate total icon width
-            icon_count = self.count_icons(self)
-
+    def _available_text_width(self, icon_count: int) -> int:
         icon_width = icon_count * 20
-        if not self.startup_impact_label.isHidden():
-            icon_width += (
-                self.startup_impact_label.fontMetrics()
-                .boundingRect(self.startup_impact_label.text())
-                .width()
-                + 6
-            )
-        if not self.translation_status_label.isHidden():
-            icon_width += (
-                self.translation_status_label.fontMetrics()
-                .boundingRect(self.translation_status_label.text())
-                .width()
-                + 6
-            )
-
-        # If only 2 icons (On the left, eg. c#/xml/steam/local etc.) No need for padding.
+        for label in (self.startup_impact_label, self.translation_status_label):
+            if not label.isHidden():
+                icon_width += label.fontMetrics().boundingRect(label.text()).width() + 6
         padding = 6 if icon_count > 2 else 0
-        self.item_width = super().width()
+        return max(0, self.width() - icon_width - padding)
 
-        available_content_width = max(0, int(self.item_width - icon_width - padding))
+    def _update_text_layout(self, icon_count: int = -1) -> None:
+        """Elide only when the effective width, text or label fonts change."""
+        if icon_count == -1:
+            icon_count = self.count_icons(self)
+        available_width = self._available_text_width(icon_count)
+        tags_text = (
+            self.mod_tags_label.toolTip()
+            if self.show_tags and not self.mod_tags_label.isHidden()
+            else ""
+        )
         layout_key = (
-            available_content_width,
-            icon_count,
-            self.show_tags,
-            self.mod_tags_label.toolTip(),
-            self.font().toString(),
+            available_width,
+            tags_text,
+            self.main_label.font().toString(),
             self.mod_tags_label.font().toString(),
             self.list_item_name,
         )
         if layout_key == self._text_layout_key:
-            return super().resizeEvent(event)
+            return
         self._text_layout_key = layout_key
-        self.font_metrics = QFontMetrics(self.font())
-        min_name_width = int(available_content_width * 0.45)
-        max_tags_width = int(available_content_width * 0.35)
-
         tags_width = 0
-        if (
-            self.show_tags
-            and not self.mod_tags_label.isHidden()
-            and self.mod_tags_label.toolTip()
-        ):
-            tags_text = self.mod_tags_label.toolTip()
-            tags_width_needed = (
-                self.mod_tags_label.fontMetrics().boundingRect(tags_text).width() + 6
+        if tags_text:
+            metrics = self.mod_tags_label.fontMetrics()
+            tags_width = min(
+                int(available_width * 0.35),
+                metrics.boundingRect(tags_text).width() + 6,
             )
-            tags_width = min(max_tags_width, tags_width_needed)
-
-            shortened_tags = self.mod_tags_label.fontMetrics().elidedText(
-                tags_text,
-                Qt.TextElideMode.ElideRight,
-                tags_width,
+            shortened_tags = metrics.elidedText(
+                tags_text, Qt.TextElideMode.ElideRight, tags_width
             )
             self.mod_tags_label.setText(" " + shortened_tags)
-            self.mod_tags_label.setMaximumWidth(tags_width)
         else:
             self.mod_tags_label.setText("")
-            self.mod_tags_label.setMaximumWidth(0)
-            tags_width = 0
+        self.mod_tags_label.setMaximumWidth(tags_width)
 
-        name_width = max(min_name_width, available_content_width - tags_width)
-        text_width_needed = QRectF(
-            self.font_metrics.boundingRect(self.list_item_name)
-        ).width()
-
-        if text_width_needed > name_width:
-            shortened_text = self.font_metrics.elidedText(
-                self.list_item_name,
-                Qt.TextElideMode.ElideRight,
-                name_width,
-            )
-            self.main_label.setText(str(shortened_text))
-        else:
-            self.main_label.setText(self.list_item_name)
-        return super().resizeEvent(event)
+        name_width = max(int(available_width * 0.45), available_width - tags_width)
+        metrics = self.main_label.fontMetrics()
+        name = self.list_item_name
+        if metrics.boundingRect(name).width() > name_width:
+            name = metrics.elidedText(name, Qt.TextElideMode.ElideRight, name_width)
+        self.main_label.setText(name)
 
     def repolish(self, item: CustomListWidgetItem) -> None:
         """
@@ -678,7 +639,7 @@ class ModListItemInner(QWidget):
         if name != self.list_item_name:
             self.list_item_name = name
             self.main_label.setToolTip(name)
-            self._resize_text_after_icon_toggle()
+            self._update_text_layout()
         error_tooltip = item_data["errors"]
         warning_tooltip = item_data["warnings"]
 
@@ -835,34 +796,26 @@ class ModListItemInner(QWidget):
         # Update ModListItemInner color
         self.mod_color = None
 
-    def update_tags_label(self, tags: list[str] | None = None) -> None:
+    def update_tags_label(self, tags: list[str] | None = None) -> bool:
+        """Apply cached tags and report whether the displayed state changed."""
         if tags is not None:
-            self._mod_tags = list(tags)
-        tags = self._mod_tags
-        state = (self.show_tags, tuple(tags))
+            self._mod_tags = tuple(tags)
+        state = (self.show_tags, self._mod_tags)
         if state == self._tag_display_state:
-            return
+            return False
         self._tag_display_state = state
         self._text_layout_key = None
 
-        if not self.show_tags or not tags:
-            self.mod_tags_label.setText("")
-            self.mod_tags_label.setToolTip(", ".join(tags) if tags else "")
-            self.mod_tags_label.setHidden(True)
-            return
-
-        full_tags_text = " ".join(f"[{tag}]" for tag in tags)
-        self.mod_tags_label.setToolTip(full_tags_text)
-        self.mod_tags_label.setHidden(False)
-
-        # The actual text is calculated in resizeEvent, where widget width is known.
-        self.mod_tags_label.setText(full_tags_text)
+        show_tags = self.show_tags and bool(self._mod_tags)
+        text = " ".join(f"[{tag}]" for tag in self._mod_tags) if show_tags else ""
+        self.mod_tags_label.setToolTip(text if show_tags else ", ".join(self._mod_tags))
+        self.mod_tags_label.setHidden(not show_tags)
+        self.mod_tags_label.setText(text)
+        return True
 
     def set_tags_visible(self, visible: bool, tags: list[str] | None = None) -> None:
-        previous_state = self._tag_display_state
         self.show_tags = visible
-        self.update_tags_label(tags)
-        if self._tag_display_state != previous_state:
+        if self.update_tags_label(tags):
             self._resize_text_after_icon_toggle()
 
 
@@ -4159,7 +4112,6 @@ class ModListWidget(QListWidget):
                 item_data.__dict__["show_tags"], item_data["mod_tags"]
             )
             widget.setToolTip(widget.get_tool_tip_text())
-            widget._resize_text_after_icon_toggle()
 
         if self.currentItem() == item:
             self.mod_info_signal.emit(uuid, item)

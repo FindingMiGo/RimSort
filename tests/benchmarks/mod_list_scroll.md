@@ -46,3 +46,32 @@ separate cost without replacing the list's rendering and interaction model.
 
 Initial row construction and retained-widget movement remain costs. These
 results do not establish smoothness for every mod count, theme, or platform.
+
+## Scroll code refactor check
+
+On 2026-09-22, the tag cache and text layout were refactored without changing the
+context-menu event routing. Tags are copied into an immutable tuple, display
+updates report whether they changed anything, and text layout is called directly
+instead of manufacturing resize events. The layout cache uses the fonts of the
+labels that actually render the text.
+
+A before/after check used the same command with `RIMSORT_SCROLL_ROWS=1000` and
+profiling disabled. This compares the already optimized implementation to its
+refactor, not to upstream. Each value is milliseconds per ten-row scroll step.
+
+| Tags | Pass | Before median | After median | Before p95 | After p95 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Off | First | 16.396 | 16.396 | 19.272 | 19.833 |
+| Off | Return | 2.545 | 2.478 | 3.114 | 2.927 |
+| Off | Repeat | 2.783 | 2.556 | 3.240 | 3.183 |
+| On | First | 27.155 | 28.931 | 31.344 | 36.184 |
+| On | Return | 4.061 | 4.129 | 4.847 | 5.220 |
+| On | Repeat | 4.318 | 4.390 | 5.066 | 5.067 |
+
+All passes made zero tag-getter calls and retained 1,000 widgets. Warm tagged
+medians differed by about 1.7%; the first tagged pass was slower in this single
+comparison. These measurements do not establish a speedup or eliminate the
+remaining cost of creating row widgets.
+
+Regression tests also cover empty cached tags, changes to tags and effective
+fonts, caller mutation of tag lists, and collection labels on lazily created rows.
