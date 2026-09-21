@@ -26,6 +26,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QAction,
     QColor,
+    QContextMenuEvent,
     QCursor,
     QDropEvent,
     QEnterEvent,
@@ -143,6 +144,7 @@ class ModListItemInner(QWidget):
         mod_color: QColor,
         show_tags: bool = False,
         metadata_controller: MetadataController | None = None,
+        mod_tags: list[str] | None = None,
     ) -> None:
         """
         Initialize the QWidget with mod path. Metadata can be accessed via MetadataController.
@@ -189,6 +191,8 @@ class ModListItemInner(QWidget):
         self.settings = settings
         # Cache whether tags should be displayed
         self.show_tags = show_tags
+        self._tag_display_state: tuple[bool, tuple[str, ...]] | None = None
+        self._text_layout_key: tuple[int, int, bool, str, str, str, str] | None = None
         # Cache the mod color
         self.mod_color: QColor | None = mod_color
 
@@ -197,6 +201,9 @@ class ModListItemInner(QWidget):
         # in this variable. This is exactly equal to the dict value of a
         # single all_mods key-value
         self.path = path
+        self._mod_tags = list(
+            mod_tags if mod_tags is not None else auxdb_get_mod_tags(settings, path)
+        )
         mod = self.metadata_controller.get_mod(self.path)
         name_value = mod.name if mod is not None else None
         if not isinstance(name_value, str):
@@ -489,7 +496,7 @@ class ModListItemInner(QWidget):
 
         name_line = f"Mod: {mod.name if mod is not None else 'Not specified'}\n"
 
-        tags = auxdb_get_mod_tags(self.settings, self.path)
+        tags = self._mod_tags
         tags_line = f"Tags: {', '.join(tags) if tags else 'None'}\n"
 
         if isinstance(mod, AboutXmlMod) and mod.authors:
@@ -597,6 +604,19 @@ class ModListItemInner(QWidget):
         self.item_width = super().width()
 
         available_content_width = max(0, int(self.item_width - icon_width - padding))
+        layout_key = (
+            available_content_width,
+            icon_count,
+            self.show_tags,
+            self.mod_tags_label.toolTip(),
+            self.font().toString(),
+            self.mod_tags_label.font().toString(),
+            self.list_item_name,
+        )
+        if layout_key == self._text_layout_key:
+            return super().resizeEvent(event)
+        self._text_layout_key = layout_key
+        self.font_metrics = QFontMetrics(self.font())
         min_name_width = int(available_content_width * 0.45)
         max_tags_width = int(available_content_width * 0.35)
 
@@ -802,8 +822,14 @@ class ModListItemInner(QWidget):
         self.mod_color = None
 
     def update_tags_label(self, tags: list[str] | None = None) -> None:
-        if tags is None:
-            tags = auxdb_get_mod_tags(self.settings, self.path)
+        if tags is not None:
+            self._mod_tags = list(tags)
+        tags = self._mod_tags
+        state = (self.show_tags, tuple(tags))
+        if state == self._tag_display_state:
+            return
+        self._tag_display_state = state
+        self._text_layout_key = None
 
         if not self.show_tags or not tags:
             self.mod_tags_label.setText("")
@@ -819,9 +845,11 @@ class ModListItemInner(QWidget):
         self.mod_tags_label.setText(full_tags_text)
 
     def set_tags_visible(self, visible: bool, tags: list[str] | None = None) -> None:
+        previous_state = self._tag_display_state
         self.show_tags = visible
         self.update_tags_label(tags)
-        self._resize_text_after_icon_toggle()
+        if self._tag_display_state != previous_state:
+            self._resize_text_after_icon_toggle()
 
 
 class TagEditDialog(QDialog):
@@ -1219,9 +1247,6 @@ class ModListWidget(QListWidget):
 
         # When an item is double clicked, move it to the opposite list
         self.itemDoubleClicked.connect(self.mod_double_clicked)
-
-        # Add an eventFilter for per mod_list_item context menu
-        self.installEventFilter(self)
 
         # Disable horizontal scroll bar
         self.horizontalScrollBar().setEnabled(False)
@@ -1682,26 +1707,28 @@ class ModListWidget(QListWidget):
         dialog.setLayout(layout)
         dialog.exec()
 
-    def eventFilter(self, object: QObject, event: QEvent) -> bool:
-        """
-        https://doc.qt.io/qtforpython/overviews/eventsandfilters.html
+    def contextMenuEvent(self, event: QContextMenuEvent) -> None:
+        if self._handle_context_menu(event):
+            event.accept()
+        else:
+            super().contextMenuEvent(event)
 
-        Takes source object and filters an event at the ListWidget level, executes
-        an action based on a per-mod_list_item contextMenu
-
-        :param object: the source object returned from the event
-        :param event: the QEvent type
+    def _handle_context_menu(self, event: QContextMenuEvent) -> bool:
         """
-        if event.type() == QEvent.Type.ContextMenu and object is self:
+        Execute the context menu action for a mod or divider.
+
+        :param event: The context menu event.
+        """
+        if event.type() == QEvent.Type.ContextMenu:
             # Get the position of the right-click event
-            pos = QCursor.pos()
+            pos = event.globalPos()
             # Convert the global position to the list widget's coordinate system
             pos_local = self.mapFromGlobal(pos)
             # Get the item at the local position
-            item = self.itemAt(pos_local)
+            item = self.itemAt(self.viewport().mapFromGlobal(pos))
             if not isinstance(item, CustomListWidgetItem):
                 logger.debug("Mod list right-click non-QListWidgetItem")
-                return super().eventFilter(object, event)
+                return False
 
             # Handle divider-specific context menu
             item_data = item.data(Qt.ItemDataRole.UserRole)
@@ -2729,7 +2756,7 @@ class ModListWidget(QListWidget):
                                 True, "user_rules", mod_metadata["packageid"]
                             )
             return True
-        return super().eventFilter(object, event)
+        return False
 
     def focusOutEvent(self, event: QFocusEvent) -> None:
         """
@@ -2950,6 +2977,7 @@ class ModListWidget(QListWidget):
                 mod_color=mod_color,
                 show_tags=show_tags,
                 metadata_controller=self.metadata_controller,
+                mod_tags=data["mod_tags"],
             )
             widget.toggle_warning_signal.connect(self.toggle_warning)
             widget.toggle_error_signal.connect(self.toggle_warning)
