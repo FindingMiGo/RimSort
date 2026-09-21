@@ -2,6 +2,7 @@ from pathlib import Path
 
 import msgspec
 
+from app.models.mod_collections import ModCollections
 from app.utils.app_info import AppInfo
 from app.utils.constants import DEFAULT_INSTANCE_NAME, INSTANCE_FOLDER_NAME
 
@@ -34,3 +35,4 @@ class Instance(msgspec.Struct):
         ""  # Custom instance folder path, empty = use default
     )
     initial_setup: bool = True
+    mod_collections: ModCollections = msgspec.field(default_factory=ModCollections)
