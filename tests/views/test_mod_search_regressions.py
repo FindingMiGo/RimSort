@@ -88,3 +88,55 @@ def test_changing_search_field_reapplies_current_text(
     assert all(item.isHidden() for item in items)
     search.clear()
     assert not any(item.isHidden() for item in items)
+
+
+@pytest.mark.parametrize("field", ["Name", "Author(s)", "PackageId", "Version"])
+def test_highlight_search_recomputes_matches_and_clear(
+    search_case: tuple[ModsPanel, str, list[CustomListWidgetItem]], field: str
+) -> None:
+    panel, list_type, items = search_case
+    setattr(panel, f"{list_type.lower()}_mods_search_filter_state", False)
+    selector = getattr(panel, f"{list_type.lower()}_mods_search_filter")
+    selector.setCurrentText(panel.tr(field))
+    for query, expected in (
+        ("missing", [True] * 3),
+        (
+            "1.6" if field == "Version" else "Alpha",
+            [False] * 3
+            if field == "Version"
+            else [True, False, True]
+            if field == "Author(s)"
+            else [False, True, True],
+        ),
+        ("", [False] * 3),
+    ):
+        panel.signal_search_and_filters(list_type, query)
+        assert [
+            item.data(Qt.ItemDataRole.UserRole)["filtered"] for item in items
+        ] == expected
+        assert not any(item.isHidden() for item in items)
+
+
+def test_highlight_recomputes_source_and_tag_filters(
+    search_case: tuple[ModsPanel, str, list[CustomListWidgetItem]],
+) -> None:
+    panel, list_type, items = search_case
+    setattr(panel, f"{list_type.lower()}_mods_search_filter_state", False)
+    filters = getattr(panel, f"{list_type.lower()}_filter_button").filter_panel
+    filters._source_checkboxes["local"].setChecked(False)
+    assert all(item.data(Qt.ItemDataRole.UserRole)["filtered"] for item in items)
+    filters._source_checkboxes["local"].setChecked(True)
+    assert not any(item.data(Qt.ItemDataRole.UserRole)["filtered"] for item in items)
+    items[0].data(Qt.ItemDataRole.UserRole)["mod_tags"] = ["keep"]
+    filters.set_available_tags(["keep"])
+    filters._tag_chips["keep"].set_active(True)
+    filters.filters_changed.emit()
+    panel.signal_search_and_filters(list_type, "missing")
+    panel.signal_search_and_filters(list_type, "")
+    assert [item.data(Qt.ItemDataRole.UserRole)["filtered"] for item in items] == [
+        False,
+        True,
+        True,
+    ]
+    filters.clear()
+    assert not any(item.data(Qt.ItemDataRole.UserRole)["filtered"] for item in items)

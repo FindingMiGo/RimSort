@@ -5297,8 +5297,8 @@ class ModsPanel(QWidget):
                 elif invalid and not filters_active:
                     item_data["filtered"] = False
                     item.setHidden(False)
-            # Check if the item is filtered
-            item_filtered = item_data["filtered"]
+            # Re-evaluate from current inputs, not the previous highlight result.
+            item_filtered = False
 
             # Search pattern filtering
             if search_filter == "version" and pattern:
