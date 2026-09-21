@@ -625,8 +625,15 @@ class FilterButton(QToolButton):
         self.clicked.connect(self._show_panel)
 
     def _show_panel(self) -> None:
-        """Position the filter panel below this button and show it."""
+        """Open beside the button while staying within its screen's work area."""
+        self.filter_panel.adjustSize()
+        bounds = self.screen().availableGeometry()
         pos = self.mapToGlobal(QPoint(0, self.height()))
+        size = self.filter_panel.size()
+        pos.setX(max(bounds.left(), min(pos.x(), bounds.right() + 1 - size.width())))
+        if pos.y() + size.height() > bounds.bottom() + 1:
+            pos.setY(self.mapToGlobal(QPoint(0, 0)).y() - size.height())
+        pos.setY(max(bounds.top(), min(pos.y(), bounds.bottom() + 1 - size.height())))
         self.filter_panel.move(pos)
         self.filter_panel.show()
 

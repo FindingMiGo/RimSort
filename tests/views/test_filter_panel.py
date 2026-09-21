@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
+from PySide6.QtCore import QPoint, QRect, QSize
 
 from app.models.filter_state import FilterState
 from app.views.filter_panel import FilterButton, FilterPanel, TagChip
@@ -286,3 +288,33 @@ class TestFilterButton:
     def test_filter_panel_attribute(self, button: FilterButton) -> None:
         """FilterButton exposes its filter panel as an attribute."""
         assert isinstance(button.filter_panel, FilterPanel)
+
+
+@pytest.mark.parametrize("origin", [QPoint(0, 0), QPoint(-1000, 100)])
+@pytest.mark.parametrize("bottom", [False, True])
+def test_popup_stays_inside_button_screen(
+    qtbot: Any, origin: QPoint, bottom: bool
+) -> None:
+    button = FilterButton()
+    qtbot.addWidget(button)
+    qtbot.addWidget(button.filter_panel)
+    button.resize(32, 32)
+    bounds = QRect(origin, QSize(800, 800))
+    anchor = QPoint(
+        bounds.right() - 20, bounds.bottom() - 40 if bottom else bounds.top() + 20
+    )
+    screen = MagicMock()
+    screen.availableGeometry.return_value = bounds
+    with (
+        patch.object(button, "screen", return_value=screen),
+        patch.object(button, "mapToGlobal", side_effect=lambda point: anchor + point),
+        patch.object(button.filter_panel, "show"),
+        patch.object(button.filter_panel, "move") as move,
+    ):
+        button._show_panel()
+    popup = QRect(move.call_args.args[0], button.filter_panel.size())
+    assert bounds.contains(popup)
+    if bottom:
+        assert popup.bottom() < anchor.y()
+    else:
+        assert popup.top() == anchor.y() + button.height()
