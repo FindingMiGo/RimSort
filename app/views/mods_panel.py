@@ -4677,6 +4677,12 @@ class ModsPanel(QWidget):
         self.inactive_mods_search_layout.addWidget(self.inactive_mods_sort_order_button)
 
     def connect_signals(self) -> None:
+        self.active_mods_search_filter.currentIndexChanged.connect(
+            lambda _: self.on_active_mods_search(self.active_mods_search.text())
+        )
+        self.inactive_mods_search_filter.currentIndexChanged.connect(
+            lambda _: self.on_inactive_mods_search(self.inactive_mods_search.text())
+        )
         self.active_mods_list.list_update_signal.connect(
             self.on_active_mods_list_updated
         )

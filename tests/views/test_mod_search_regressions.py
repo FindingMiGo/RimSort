@@ -72,3 +72,19 @@ def test_workshop_id_search_and_clear(
     ):
         panel.signal_search_and_filters(list_type, query)
         assert [item.isHidden() for item in items] == hidden
+
+
+def test_changing_search_field_reapplies_current_text(
+    search_case: tuple[ModsPanel, str, list[CustomListWidgetItem]],
+) -> None:
+    panel, list_type, items = search_case
+    selector = getattr(panel, f"{list_type.lower()}_mods_search_filter")
+    search = getattr(panel, f"{list_type.lower()}_mods_search")
+    search.setText("Alpha")
+    assert [item.isHidden() for item in items] == [False, True, True]
+    selector.setCurrentText(panel.tr("Author(s)"))
+    assert [item.isHidden() for item in items] == [True, False, True]
+    selector.setCurrentText(panel.tr("PublishedFileId"))
+    assert all(item.isHidden() for item in items)
+    search.clear()
+    assert not any(item.isHidden() for item in items)
