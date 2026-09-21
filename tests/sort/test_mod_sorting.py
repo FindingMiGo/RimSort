@@ -387,6 +387,51 @@ class TestGetDirSize:
             result = get_dir_size(str(tmp_path))
         assert result == 0
 
+    @pytest.mark.parametrize("target_name", [".", "sub"])
+    def test_directory_links_do_not_repeat_content(
+        self, tmp_path: Path, target_name: str
+    ) -> None:
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (tmp_path / "top.txt").write_bytes(b"top")
+        (sub / "nested.txt").write_bytes(b"nested")
+        try:
+            (sub / "link").symlink_to(tmp_path / target_name, target_is_directory=True)
+            (tmp_path / "alias").symlink_to(sub, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"Directory symlinks unavailable: {exc}")
+        assert get_dir_size(str(tmp_path)) == 9
+
+    def test_root_directory_link_is_followed(self, tmp_path: Path) -> None:
+        target = tmp_path / "target"
+        target.mkdir()
+        (target / "file.txt").write_bytes(b"hello")
+        link = tmp_path / "link"
+        try:
+            link.symlink_to(target, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"Directory symlinks unavailable: {exc}")
+        assert get_dir_size(str(link)) == 5
+
+    def test_junction_cycle_is_not_scanned_twice(self) -> None:
+        # Win32 scanpath reports junctions as ordinary directories.
+        junction = MagicMock()
+        junction.path = "mods/junction"
+        junction.is_file.return_value = False
+        junction.is_dir.return_value = True
+        file = MagicMock()
+        file.is_file.return_value = True
+        file.stat.return_value.st_size = 7
+        with (
+            patch("app.sort.mod_sorting.os.path.realpath", return_value="mods"),
+            patch(
+                "app.sort.mod_sorting.scanpath",
+                side_effect=[[file, junction], AssertionError("Repeated traversal")],
+            ) as scan,
+        ):
+            assert get_dir_size("mods") == 7
+        scan.assert_called_once_with("mods")
+
 
 # ---------------------------------------------------------------------------
 # path_to_mod_tags

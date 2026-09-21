@@ -221,11 +221,18 @@ def path_to_mod_updated(
 
 
 def get_dir_size(path: str) -> int:
+    """Sum file sizes, visiting each resolved directory only once."""
     total = 0
     stack = [path]
+    visited: set[str] = set()
     while stack:
         current = stack.pop()
         try:
+            # Resolve directory symlinks and Windows junctions before descending.
+            resolved = os.path.normcase(os.path.realpath(current))
+            if resolved in visited:
+                continue
+            visited.add(resolved)
             for entry in scanpath(current):
                 if entry.is_file():
                     total += entry.stat().st_size
