@@ -5348,6 +5348,11 @@ class ModsPanel(QWidget):
                 ):
                     item_filtered = True
 
+            elif search_filter == "publishedfileid":
+                item_filtered = bool(pattern.strip()) and pattern.strip() not in str(
+                    mod_obj.published_file_id or ""
+                )
+
             # Source filtering (set-based from FilterState)
             if not item_filtered and fs.sources != FilterState.ALL_SOURCES:
                 _type_to_source = {
