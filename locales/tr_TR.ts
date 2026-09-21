@@ -82,6 +82,61 @@
         <source>Delete</source>
         <translation>Silmek</translation>
     </message>
+    <message>
+        <location filename="../app/windows/base_mods_panel.py" line="1128"/>
+        <location filename="../app/windows/missing_mods_panel.py" line="52"/>
+        <source>Name</source>
+        <translation type="unfinished">İsim</translation>
+    </message>
+    <message>
+        <location filename="../app/windows/base_mods_panel.py" line="1129"/>
+        <source>Author</source>
+        <translation type="unfinished">Yazar</translation>
+    </message>
+    <message>
+        <location filename="../app/windows/base_mods_panel.py" line="1130"/>
+        <location filename="../app/windows/missing_mods_panel.py" line="53"/>
+        <source>Package ID</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/windows/base_mods_panel.py" line="1131"/>
+        <location filename="../app/windows/missing_mods_panel.py" line="56"/>
+        <source>Published File Id</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/windows/base_mods_panel.py" line="1132"/>
+        <location filename="../app/windows/missing_mods_panel.py" line="54"/>
+        <source>Supported Versions</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/windows/base_mods_panel.py" line="1133"/>
+        <source>Mod Downloaded</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/windows/base_mods_panel.py" line="1134"/>
+        <source>Updated on Workshop</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/windows/base_mods_panel.py" line="1135"/>
+        <source>Source</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/windows/base_mods_panel.py" line="1136"/>
+        <source>Path</source>
+        <translation type="unfinished">Yol</translation>
+    </message>
+    <message>
+        <location filename="../app/windows/base_mods_panel.py" line="1137"/>
+        <location filename="../app/windows/missing_mods_panel.py" line="57"/>
+        <source>Workshop Page</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>CollectionImport</name>
