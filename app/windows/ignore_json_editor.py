@@ -1,5 +1,5 @@
 from loguru import logger
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QCoreApplication, Qt
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -15,10 +15,8 @@ from PySide6.QtWidgets import (
 from app.utils.event_bus import EventBus
 from app.utils.ignore_manager import IgnoreManager
 
+
 # Placeholder text shown when ignore list is empty
-_EMPTY_LIST_PLACEHOLDER = "No mods in ignore list."
-
-
 class IgnoreJsonEditor(QDialog):
     """
     Dialog for managing the ignore list of mods.
@@ -39,7 +37,9 @@ class IgnoreJsonEditor(QDialog):
 
         self.setWindowTitle(self.tr("RimSort - Manage Ignore List"))
         self.setGeometry(100, 100, 500, 400)
-        self._empty_list_placeholder = self.tr(_EMPTY_LIST_PLACEHOLDER)
+        self._empty_list_placeholder = QCoreApplication.translate(
+            "IgnoreJsonEditor", "No mods in ignore list."
+        )
 
         # Create main layout
         main_layout = QVBoxLayout(self)
@@ -122,7 +122,9 @@ class IgnoreJsonEditor(QDialog):
             QMessageBox.critical(
                 self,
                 self.tr("Error"),
-                self.tr(f"Failed to load ignored mods: {e}"),
+                QCoreApplication.translate(
+                    "IgnoreJsonEditor", "Failed to load ignored mods: {e}"
+                ).format(e=e),
             )
 
     def _add_empty_placeholder(self) -> None:
@@ -172,7 +174,9 @@ class IgnoreJsonEditor(QDialog):
             QMessageBox.critical(
                 self,
                 self.tr("Error"),
-                self.tr(f"Error saving changes: {e}"),
+                QCoreApplication.translate(
+                    "IgnoreJsonEditor", "Error saving changes: {e}"
+                ).format(e=e),
             )
 
     def _collect_remaining_mods(self) -> set[str]:

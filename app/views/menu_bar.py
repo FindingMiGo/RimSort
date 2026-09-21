@@ -3,7 +3,7 @@ from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QCoreApplication, QObject
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import QMenu, QMenuBar
 
@@ -164,7 +164,7 @@ class MenuBar(QObject):
         file_menu.addSeparator()
 
         self.upload_submenu = self._create_logfile_submenu(
-            "Upload Log", self.upload_log_actions
+            QCoreApplication.translate("MenuBar", "Upload Log"), self.upload_log_actions
         )
         file_menu.addMenu(self.upload_submenu)
 
@@ -172,7 +172,8 @@ class MenuBar(QObject):
             file_menu.addSeparator()
 
             self.default_open_logs_submenu = self._create_logfile_submenu(
-                "Open Log in Default Editor", self.default_open_log_actions
+                QCoreApplication.translate("MenuBar", "Open Log in Default Editor"),
+                self.default_open_log_actions,
             )
             file_menu.addMenu(self.default_open_logs_submenu)
         file_menu.addSeparator()
@@ -240,7 +241,7 @@ class MenuBar(QObject):
                 return Path(config_str).parent / suffix
             return None
 
-        logfile_submenu = QMenu(self.tr(menu_name))
+        logfile_submenu = QMenu(menu_name)
         create_entry("RimSort.log", lambda: AppInfo().user_log_folder / "RimSort.log")
         create_entry(
             "RimSort.old.log", lambda: AppInfo().user_log_folder / "RimSort.old.log"

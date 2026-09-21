@@ -52,7 +52,7 @@ class MissingModsPrompt(BaseModsPanel):
                 QCoreApplication.translate("BaseModsPanel", "Name"),
                 QCoreApplication.translate("BaseModsPanel", "Package ID"),
                 QCoreApplication.translate("BaseModsPanel", "Supported Versions"),
-                self.tr("# Variants"),
+                QCoreApplication.translate("MissingModsPrompt", "# Variants"),
                 QCoreApplication.translate("BaseModsPanel", "Published File Id"),
                 QCoreApplication.translate("BaseModsPanel", "Workshop Page"),
             ],

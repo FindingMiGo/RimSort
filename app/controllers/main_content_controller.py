@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, cast
 
 from github import Github, Repository
 from loguru import logger
-from PySide6.QtCore import QObject, QThreadPool, Slot
+from PySide6.QtCore import QCoreApplication, QObject, QThreadPool, Slot
 from PySide6.QtWidgets import QInputDialog, QMessageBox
 
 from app.controllers.metadata_controller import MetadataController
@@ -551,7 +551,11 @@ class MainContentController(QObject):
                 )
                 details_msg += f"  ✓ {repo_name}<br>    └─ {commit_info}<br>"
 
-            details_msg += f"<br>{self.tr('Failed updates:')}<br>"
+            details_msg += (
+                "<br>"
+                + QCoreApplication.translate("MainContentController", "Failed updates:")
+                + "<br>"
+            )
             for repo_path, err in failed:
                 details_msg += f"  ✗ {Path(repo_path).name}: {err}<br>"
 
@@ -660,7 +664,11 @@ class MainContentController(QObject):
             details_msg = self.tr("Successful pushes:\n")
             for p in successful:
                 details_msg += f"  \u2713 {Path(p).name}\n"
-            details_msg += f"\n{self.tr('Failed pushes:')}\n"
+            details_msg += (
+                "\n"
+                + QCoreApplication.translate("MainContentController", "Failed pushes:")
+                + "\n"
+            )
             for repo_path, err in failed:
                 details_msg += f"  \u2717 {Path(repo_path).name}: {err}\n"
 

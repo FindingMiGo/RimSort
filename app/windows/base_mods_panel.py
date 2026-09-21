@@ -282,7 +282,9 @@ class BaseModsPanel(QWidget):
             title=QLabel(),
             details_label=QLabel(),
             editor_select_all_button=factory.create_select_all_button(),
-            editor_cancel_button=QPushButton(self.tr("Do nothing and exit")),
+            editor_cancel_button=QPushButton(
+                QCoreApplication.translate("BaseModsPanel", "Do nothing and exit")
+            ),
         )
         self.ui_elements.editor_cancel_button.setObjectName("dangerButton")
 
@@ -612,7 +614,7 @@ class BaseModsPanel(QWidget):
         button = QPushButton()
         self._configure_button(
             button,
-            self.tr("Open Page"),
+            QCoreApplication.translate("BaseModsPanel", "Open Page"),
             object_name,
             partial(platform_specific_open, url),
         )
@@ -669,7 +671,7 @@ class BaseModsPanel(QWidget):
         ].steam_client_integration
 
         button = QPushButton()
-        button.setText(self.tr("Delete"))
+        button.setText(QCoreApplication.translate("BaseModsPanel", "Delete"))
         button.setObjectName("dangerButton")
         deletion_menu = ModDeletionMenu(
             settings=settings,
@@ -1193,7 +1195,7 @@ class BaseModsPanel(QWidget):
         steam_client_integration_enabled = self._get_steam_client_integration_enabled()
         return ButtonConfig(
             button_type=ButtonType.DELETE,
-            text=self.tr("Delete"),
+            text=QCoreApplication.translate("BaseModsPanel", "Delete"),
             pfid_column=ColumnIndex.PUBLISHED_FILE_ID.value,
             get_selected_mod_metadata=self._get_selected_mod_metadata,
             completion_callback=self._refresh_metadata_and_panel,

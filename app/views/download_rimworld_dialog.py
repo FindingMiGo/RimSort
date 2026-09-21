@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QCoreApplication, Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -153,4 +153,9 @@ class DownloadRimWorldDialog(QDialog):
                 ),
             )
         except Exception as e:
-            show_warning(self.tr("Error"), self.tr(f"Failed to start download: {e}"))
+            show_warning(
+                self.tr("Error"),
+                QCoreApplication.translate(
+                    "DownloadRimWorldDialog", "Failed to start download: {e}"
+                ).format(e=e),
+            )

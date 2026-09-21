@@ -710,7 +710,9 @@ class ModInfoPanel:
             self.mod_info_folder_size_value.setText(format_file_size(size_bytes))
         except Exception as e:
             logger.error(f"Error calculating folder size for UUID {uuid}: {e}")
-            self.mod_info_folder_size_value.setText("Not available")
+            self.mod_info_folder_size_value.setText(
+                QCoreApplication.translate("ModInfoPanel", "Not available")
+            )
 
     def _set_timestamp_info(
         self, timestamp: int | None, label: QLabel, field_name: str
@@ -723,9 +725,11 @@ class ModInfoPanel:
                 label.setText(formatted_time)
             except (ValueError, OSError, OverflowError) as e:
                 logger.error(f"Error formatting {field_name}: {e}")
-                label.setText("Invalid timestamp")
+                label.setText(
+                    QCoreApplication.translate("ModInfoPanel", "Invalid timestamp")
+                )
         else:
-            label.setText("Not available")
+            label.setText(QCoreApplication.translate("ModInfoPanel", "Not available"))
 
     def _set_filesystem_time_info(self, mod_path: str | None) -> None:
         """Set filesystem modification time information."""
@@ -737,9 +741,13 @@ class ModInfoPanel:
                 )
             except (ValueError, OSError, OverflowError) as e:
                 logger.error(f"Error formatting filesystem time: {e}")
-                self.mod_info_filesystem_time_value.setText("Invalid timestamp")
+                self.mod_info_filesystem_time_value.setText(
+                    QCoreApplication.translate("ModInfoPanel", "Invalid timestamp")
+                )
         else:
-            self.mod_info_filesystem_time_value.setText("Not available")
+            self.mod_info_filesystem_time_value.setText(
+                QCoreApplication.translate("ModInfoPanel", "Not available")
+            )
 
     def _set_external_times_info(self, mod_metadata: dict[str, Any]) -> None:
         """Set external workshop times information."""
@@ -752,33 +760,47 @@ class ModInfoPanel:
             try:
                 dt_created = datetime.fromtimestamp(int(external_time_created))  # noqa: DTZ006
                 external_times.append(
-                    f"Created: {dt_created.strftime('%Y-%m-%d %H:%M:%S')}"
+                    QCoreApplication.translate(
+                        "ModInfoPanel", "Created: {timestamp}"
+                    ).format(timestamp=dt_created.strftime("%Y-%m-%d %H:%M:%S"))
                 )
             except (ValueError, OSError, OverflowError):
-                external_times.append("Created: Invalid")
+                external_times.append(
+                    QCoreApplication.translate("ModInfoPanel", "Created: Invalid")
+                )
 
         if external_time_updated is not None and external_time_updated > 0:
             try:
                 dt_updated = datetime.fromtimestamp(int(external_time_updated))  # noqa: DTZ006
                 external_times.append(
-                    f"Updated: {dt_updated.strftime('%Y-%m-%d %H:%M:%S')}"
+                    QCoreApplication.translate(
+                        "ModInfoPanel", "Updated: {timestamp}"
+                    ).format(timestamp=dt_updated.strftime("%Y-%m-%d %H:%M:%S"))
                 )
             except (ValueError, OSError, OverflowError):
-                external_times.append("Updated: Invalid")
+                external_times.append(
+                    QCoreApplication.translate("ModInfoPanel", "Updated: Invalid")
+                )
 
         if internal_time_updated is not None and internal_time_updated > 0:
             try:
                 dt_int_updated = datetime.fromtimestamp(int(internal_time_updated))  # noqa: DTZ006
                 external_times.append(
-                    f"Steam Updated: {dt_int_updated.strftime('%Y-%m-%d %H:%M:%S')}"
+                    QCoreApplication.translate(
+                        "ModInfoPanel", "Steam Updated: {timestamp}"
+                    ).format(timestamp=dt_int_updated.strftime("%Y-%m-%d %H:%M:%S"))
                 )
             except (ValueError, OSError, OverflowError):
-                external_times.append("Steam Updated: Invalid")
+                external_times.append(
+                    QCoreApplication.translate("ModInfoPanel", "Steam Updated: Invalid")
+                )
 
         if external_times:
             self.mod_info_external_times_value.setText("\n".join(external_times))
         else:
-            self.mod_info_external_times_value.setText("Not available")
+            self.mod_info_external_times_value.setText(
+                QCoreApplication.translate("ModInfoPanel", "Not available")
+            )
 
     def _set_mod_info_fields(
         self, mod_metadata: dict[str, Any], mod_info: ModInfo, uuid: str

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QCoreApplication, QPoint, QRect, QSize, Qt, Signal
 from PySide6.QtGui import QIcon, QMouseEvent, QResizeEvent, QShowEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -609,7 +609,7 @@ class FilterButton(QToolButton):
 
         icon_path = str(AppInfo().theme_data_folder / "default-icons" / "AppIcon_b.png")
         self.setIcon(QIcon(icon_path))
-        self.setToolTip("Filter mods")
+        self.setToolTip(QCoreApplication.translate("FilterButton", "Filter mods"))
 
         # Badge label positioned as a child widget (top-right corner)
         self._badge_label = QLabel(self)

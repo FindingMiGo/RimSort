@@ -4,7 +4,7 @@ import os
 from typing import Any, Optional
 
 from loguru import logger
-from PySide6.QtCore import QEventLoop, QObject, Slot
+from PySide6.QtCore import QCoreApplication, QEventLoop, QObject, Slot
 from PySide6.QtWidgets import QMessageBox
 
 import app.utils.constants as app_constants
@@ -523,7 +523,9 @@ class DatabaseBuilder(QObject):
             dialogue.show_warning(
                 title=self.tr("Save Error"),
                 text=self.tr("Failed to save merged database"),
-                information=self.tr(f"Error: {e}"),
+                information=QCoreApplication.translate(
+                    "DatabaseBuilder", "Error: {e}"
+                ).format(e=e),
             )
 
     @Slot()

@@ -5,6 +5,7 @@ from shutil import rmtree
 from typing import Any
 
 from loguru import logger
+from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu, QMessageBox
 
@@ -285,18 +286,19 @@ class ModDeletionMenu(QMenu):
         if result.success_count > 0:
             show_information(
                 title=self.tr("RimSort"),
-                text=self.tr(
-                    f"Successfully deleted {result.success_count} selected mods."
-                ),
+                text=QCoreApplication.translate(
+                    "ModDeletionMenu", "Successfully deleted {count} selected mods."
+                ).format(count=result.success_count),
             )
 
             # Show failure message if any deletions failed
             if result.failed_count > 0:
                 show_warning(
                     title=self.tr("Deletion Incomplete"),
-                    text=self.tr(
-                        f"Failed to delete {result.failed_count} mod(s). Check logs for details."
-                    ),
+                    text=QCoreApplication.translate(
+                        "ModDeletionMenu",
+                        "Failed to delete {count} mod(s). Check logs for details.",
+                    ).format(count=result.failed_count),
                 )
 
         # Call completion callback if provided
@@ -566,8 +568,13 @@ class ModDeletionMenu(QMenu):
             show_warning(
                 title=self.tr("Unable to delete mod"),
                 text=warning_text,
-                information=self.tr(
-                    f"{e.strerror or 'Unknown error'} occurred at {e.filename or mod_path} with error code {error_code}."
+                information=QCoreApplication.translate(
+                    "ModDeletionMenu",
+                    "{error} occurred at {path} with error code {error_code}.",
+                ).format(
+                    error=e.strerror or "Unknown error",
+                    path=e.filename or mod_path,
+                    error_code=error_code,
                 ),
             )
             return False
@@ -577,9 +584,10 @@ class ModDeletionMenu(QMenu):
         selected_count = len(self.get_selected_mod_metadata())
         self._perform_deletion_operation(
             confirmation_title=self.tr("Confirm Complete Deletion"),
-            confirmation_text=self.tr(
-                f"You have selected {selected_count} mod(s) for complete deletion."
-            ),
+            confirmation_text=QCoreApplication.translate(
+                "ModDeletionMenu",
+                "You have selected {selected_count} mod(s) for complete deletion.",
+            ).format(selected_count=selected_count),
             confirmation_info=self.tr(
                 "<br>This operation will permanently delete the selected mod directories from the filesystem.<br><br>Do you want to proceed?"
             ),
@@ -591,9 +599,10 @@ class ModDeletionMenu(QMenu):
         selected_count = len(self.get_selected_mod_metadata())
         self._perform_deletion_operation(
             confirmation_title=self.tr("Confirm DDS Deletion"),
-            confirmation_text=self.tr(
-                f"You have selected {selected_count} mod(s) for DDS texture deletion."
-            ),
+            confirmation_text=QCoreApplication.translate(
+                "ModDeletionMenu",
+                "You have selected {selected_count} mod(s) for DDS texture deletion.",
+            ).format(selected_count=selected_count),
             confirmation_info=self.tr(
                 "<br>This operation will only delete optimized textures (.dds files) from the selected mods.<br><br>Do you want to proceed?"
             ),
@@ -616,9 +625,10 @@ class ModDeletionMenu(QMenu):
         selected_count = len(self.get_selected_mod_metadata())
         self._perform_deletion_operation(
             confirmation_title=self.tr("Confirm Selective Deletion"),
-            confirmation_text=self.tr(
-                f"You have selected {selected_count} mod(s) for selective deletion."
-            ),
+            confirmation_text=QCoreApplication.translate(
+                "ModDeletionMenu",
+                "You have selected {selected_count} mod(s) for selective deletion.",
+            ).format(selected_count=selected_count),
             confirmation_info=self.tr(
                 "<br>This operation will delete all mod files except for .dds texture files.<br>The .dds files will be preserved.<br><br>Do you want to proceed?"
             ),
@@ -640,6 +650,12 @@ class ModDeletionMenu(QMenu):
         Delete selected mods and unsubscribe them from Steam Workshop.
         """
         self._delete_mods_and_manage_steam("unsubscribe")
+
+    @staticmethod
+    def _steam_action_label(action: str) -> str:
+        if action == "unsubscribe":
+            return QCoreApplication.translate("ModDeletionMenu", "unsubscribe")
+        return QCoreApplication.translate("ModDeletionMenu", "resubscribe")
 
     def _handle_steam_action(
         self, action: str, deleted_mods: list[ModMetadata]
@@ -691,13 +707,13 @@ class ModDeletionMenu(QMenu):
             # Show success message
             show_information(
                 title=self.tr("Steam {action}").format(
-                    action=self.tr(action).capitalize()
+                    action=self._steam_action_label(action).capitalize()
                 ),
                 text=self.tr(
                     "Successfully initiated {action} from {len} Steam Workshop mod(s).<br>"
                     "The process may take a few moments to complete."
                 ).format(
-                    action=self.tr(action).capitalize(),
+                    action=self._steam_action_label(action).capitalize(),
                     len=len(publishedfileids),
                 ),
             )
@@ -710,11 +726,11 @@ class ModDeletionMenu(QMenu):
             logger.error(f"Failed to initiate Steam {action}: {e}")
             show_warning(
                 title=self.tr("{action} Error").format(
-                    action=self.tr(action).capitalize()
+                    action=self._steam_action_label(action).capitalize()
                 ),
                 text=self.tr(
                     "An error occurred while trying to {action} from Steam Workshop mods."
-                ).format(action=self.tr(action)),
+                ).format(action=self._steam_action_label(action)),
                 information=str(e),
             )
 
@@ -750,17 +766,29 @@ class ModDeletionMenu(QMenu):
 
         selected_count = len(selected_mods)
         steam_count = len(steam_mods)
-        action_capitalized = self.tr(action).capitalize()
-        action_past = self.tr(action + "d")
+        action_capitalized = self._steam_action_label(action).capitalize()
+        action_past = (
+            QCoreApplication.translate("ModDeletionMenu", "unsubscribed")
+            if action == "unsubscribe"
+            else QCoreApplication.translate("ModDeletionMenu", "resubscribed")
+        )
 
         if self._confirm_deletion(
-            self.tr(f"Confirm Deletion and {action_capitalized}"),
-            self.tr(
-                f"You have selected {selected_count} mod(s) for deletion.<br>{steam_count} of these are Steam Workshop mods that will also be {action_past}."
+            QCoreApplication.translate(
+                "ModDeletionMenu", "Confirm Deletion and {action_capitalized}"
+            ).format(action_capitalized=action_capitalized),
+            QCoreApplication.translate(
+                "ModDeletionMenu",
+                "You have selected {selected_count} mod(s) for deletion.<br>{steam_count} of these are Steam Workshop mods that will also be {action_past}.",
+            ).format(
+                selected_count=selected_count,
+                steam_count=steam_count,
+                action_past=action_past,
             ),
-            self.tr(
-                f"<br>This operation will:<br>• Delete the selected mod directories from your filesystem<br>• {action_capitalized} Steam Workshop mods from your Steam account<br><br>Do you want to proceed?"
-            ),
+            QCoreApplication.translate(
+                "ModDeletionMenu",
+                "<br>This operation will:<br>• Delete the selected mod directories from your filesystem<br>• {action_capitalized} Steam Workshop mods from your Steam account<br><br>Do you want to proceed?",
+            ).format(action_capitalized=action_capitalized),
         ):
             # Synchronize remove_from_uuids with current selected mods before deletion
             self._sync_remove_from_uuids_with_selected_mods()

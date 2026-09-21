@@ -10,6 +10,7 @@ from typing import Any, cast
 from loguru import logger
 from platformdirs import PlatformDirs
 from PySide6.QtCore import (
+    QCoreApplication,
     QEvent,
     QItemSelection,
     QKeyCombination,
@@ -1980,10 +1981,18 @@ class ModListWidget(QListWidget):
                             )
                         # Change mod color action
                         change_mod_color_action = QAction()
-                        change_mod_color_action.setText("Change mod colors")
+                        change_mod_color_action.setText(
+                            QCoreApplication.translate(
+                                "ModListWidget", "Change mod colors"
+                            )
+                        )
                         reset_mod_color_action = QAction()
                         # jscpd:ignore-start
-                        reset_mod_color_action.setText("Reset mod colors")
+                        reset_mod_color_action.setText(
+                            QCoreApplication.translate(
+                                "ModListWidget", "Reset mod colors"
+                            )
+                        )
 
                         add_mod_tags_action = QAction()
                         add_mod_tags_action.setText(self.tr("Add new tags..."))
@@ -4488,7 +4497,9 @@ class ModsPanel(QWidget):
         self.warnings_text.setToolTip(self.tr("Click to only show mods with warnings"))
         self.errors_icon: QLabel = QLabel()
         self.errors_icon.setPixmap(ModListIcons.error_icon().pixmap(QSize(20, 20)))
-        self.errors_text: AdvancedClickableQLabel = AdvancedClickableQLabel("0 errors")
+        self.errors_text: AdvancedClickableQLabel = AdvancedClickableQLabel(
+            QCoreApplication.translate("ModsPanel", "0 errors")
+        )
         self.errors_text.setObjectName("summaryValue")
         self.errors_text.setToolTip(self.tr("Click to only show mods with errors"))
         self.warnings_layout = QHBoxLayout()

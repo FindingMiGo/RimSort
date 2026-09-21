@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import Slot
+from PySide6.QtCore import QCoreApplication, Slot
 from PySide6.QtWidgets import QMessageBox
 
 from app.controllers.settings_tabs.base_tab_controller import BaseTabController
@@ -166,7 +166,9 @@ class LocationsTabController(BaseTabController):
         if SystemInfo().operating_system == SystemInfo.OperatingSystem.MACOS:
             game_location = show_dialogue_file(
                 mode="open_dir",
-                caption="Select Game Location",
+                caption=QCoreApplication.translate(
+                    "SettingsDialog", "Select Game Location"
+                ),
             )
             if not game_location:
                 return None
@@ -174,7 +176,9 @@ class LocationsTabController(BaseTabController):
         else:
             game_location = show_dialogue_file(
                 mode="open_dir",
-                caption="Select Game Location",
+                caption=QCoreApplication.translate(
+                    "SettingsDialog", "Select Game Location"
+                ),
             )
             if not game_location:
                 return None
@@ -184,7 +188,7 @@ class LocationsTabController(BaseTabController):
         if not is_valid:
             QMessageBox.information(
                 dialog,
-                dialog.tr("Invalid Game Location"),
+                QCoreApplication.translate("SettingsDialog", "Invalid Game Location"),
                 error_msg,
             )
             return None
@@ -200,7 +204,9 @@ class LocationsTabController(BaseTabController):
     def _on_config_choose(self, dialog: SettingsDialog) -> str | None:
         config_folder = show_dialogue_file(
             mode="open_dir",
-            caption="Select Config Folder",
+            caption=QCoreApplication.translate(
+                "SettingsDialog", "Select Config Folder"
+            ),
         )
         if not config_folder:
             return None
@@ -209,7 +215,7 @@ class LocationsTabController(BaseTabController):
         if not is_valid:
             QMessageBox.warning(
                 dialog,
-                dialog.tr("Invalid Config Folder"),
+                QCoreApplication.translate("SettingsDialog", "Invalid Config Folder"),
                 error_msg,
             )
             return None
@@ -220,7 +226,9 @@ class LocationsTabController(BaseTabController):
     def _on_steam_mods_choose(self, dialog: SettingsDialog) -> str | None:
         steam_mods_folder = show_dialogue_file(
             mode="open_dir",
-            caption="Select Steam Mods Folder",
+            caption=QCoreApplication.translate(
+                "SettingsDialog", "Select Steam Mods Folder"
+            ),
         )
         if not steam_mods_folder:
             return None
@@ -236,7 +244,9 @@ class LocationsTabController(BaseTabController):
     def _on_local_mods_choose(self, dialog: SettingsDialog) -> str | None:
         local_mods_folder = show_dialogue_file(
             mode="open_dir",
-            caption="Select Local Mods Folder",
+            caption=QCoreApplication.translate(
+                "SettingsDialog", "Select Local Mods Folder"
+            ),
         )
         if not local_mods_folder:
             return None
@@ -245,7 +255,9 @@ class LocationsTabController(BaseTabController):
         if not is_valid:
             QMessageBox.warning(
                 dialog,
-                dialog.tr("Invalid Local Mods Folder"),
+                QCoreApplication.translate(
+                    "SettingsDialog", "Invalid Local Mods Folder"
+                ),
                 error_msg,
             )
             return None
@@ -259,8 +271,12 @@ class LocationsTabController(BaseTabController):
     def _on_clear_all_button_clicked(self, skip_confirmation: bool = False) -> None:
         if not skip_confirmation:
             answer = BinaryChoiceDialog(
-                title=self.dialog.tr("Clear all locations"),
-                text=self.dialog.tr("Are you sure you want to clear all locations?"),
+                title=QCoreApplication.translate(
+                    "SettingsDialog", "Clear all locations"
+                ),
+                text=QCoreApplication.translate(
+                    "SettingsDialog", "Are you sure you want to clear all locations?"
+                ),
             )
             if not answer.exec_is_positive():
                 return

@@ -833,6 +833,11 @@ Manage mods installed from GitHub releases.</source>
         <source>Error saving changes: {e}</source>
         <translation>{e}</translation>
     </message>
+    <message>
+        <location filename="../app/windows/ignore_json_editor.py" line="40"/>
+        <source>No mods in ignore list.</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>InstanceController</name>
@@ -2414,6 +2419,16 @@ Manage mods installed from GitHub releases.</source>
         <source>{count} repositories were updated with their latest commits:</source>
         <translation>Los repositorios se actualizaron con sus últimos compromisos: {count}</translation>
     </message>
+    <message>
+        <location filename="../app/controllers/main_content_controller.py" line="556"/>
+        <source>Failed updates:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/controllers/main_content_controller.py" line="669"/>
+        <source>Failed pushes:</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>MainWindow</name>
@@ -2712,6 +2727,16 @@ Manage mods installed from GitHub releases.</source>
         <source>Reset Mod Colors</source>
         <translation>Restablecer colores de mods</translation>
     </message>
+    <message>
+        <location filename="../app/views/menu_bar.py" line="167"/>
+        <source>Upload Log</source>
+        <translation type="unfinished">Log de carga</translation>
+    </message>
+    <message>
+        <location filename="../app/views/menu_bar.py" line="175"/>
+        <source>Open Log in Default Editor</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>MenuBarController</name>
@@ -2825,6 +2850,58 @@ Comuníquese con los autores de los mods para agregar estas propiedades a sus mo
     <message>
         <source>Add to Ignore List</source>
         <translation>Añadir a la lista de ignorados</translation>
+    </message>
+    <message>
+        <location filename="../app/windows/missing_mod_properties_panel.py" line="105"/>
+        <source>No Selection</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/windows/missing_mod_properties_panel.py" line="106"/>
+        <source>Please select mods to add to the ignore list.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/windows/missing_mod_properties_panel.py" line="122"/>
+        <location filename="../app/windows/missing_mod_properties_panel.py" line="153"/>
+        <location filename="../app/windows/missing_mod_properties_panel.py" line="256"/>
+        <source>Error</source>
+        <translation type="unfinished">Error</translation>
+    </message>
+    <message>
+        <location filename="../app/windows/missing_mod_properties_panel.py" line="123"/>
+        <source>Error adding mods to ignore list: {error}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/windows/missing_mod_properties_panel.py" line="154"/>
+        <source>Failed to add mods to ignore list.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/windows/missing_mod_properties_panel.py" line="167"/>
+        <source>Success</source>
+        <translation type="unfinished">Éxito</translation>
+    </message>
+    <message>
+        <location filename="../app/windows/missing_mod_properties_panel.py" line="168"/>
+        <source>Mods added to ignore list. Panel will refresh.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/windows/missing_mod_properties_panel.py" line="244"/>
+        <source>Cannot add mods with missing Package IDs to the ignore list.&lt;br&gt;These mods need valid Package IDs first:&lt;br&gt;{mods}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/windows/missing_mod_properties_panel.py" line="250"/>
+        <source>Cannot Add</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/windows/missing_mod_properties_panel.py" line="257"/>
+        <source>Could not extract package IDs from selected mods.</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -3009,6 +3086,21 @@ Seleccione su variante de mod de Mod en la tabla a continuación. También puede
         <source>Confirm Deletion and {action_capitalized}</source>
         <translation>Confirmar la eliminación y {action_capitalized}</translation>
     </message>
+    <message>
+        <location filename="../app/views/deletion_menu.py" line="289"/>
+        <source>Successfully deleted {count} selected mods.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/deletion_menu.py" line="298"/>
+        <source>Failed to delete {count} mod(s). Check logs for details.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/deletion_menu.py" line="571"/>
+        <source>{error} occurred at {path} with error code {error_code}.</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>ModInfoPanel</name>
@@ -3087,6 +3179,50 @@ Seleccione su variante de mod de Mod en la tabla a continuación. También puede
     <message>
         <source>None</source>
         <translation>Ninguno</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_info_panel.py" line="714"/>
+        <location filename="../app/views/mod_info_panel.py" line="732"/>
+        <location filename="../app/views/mod_info_panel.py" line="749"/>
+        <location filename="../app/views/mod_info_panel.py" line="802"/>
+        <source>Not available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_info_panel.py" line="729"/>
+        <location filename="../app/views/mod_info_panel.py" line="745"/>
+        <source>Invalid timestamp</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_info_panel.py" line="763"/>
+        <source>Created: {timestamp}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_info_panel.py" line="769"/>
+        <source>Created: Invalid</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_info_panel.py" line="776"/>
+        <source>Updated: {timestamp}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_info_panel.py" line="782"/>
+        <source>Updated: Invalid</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_info_panel.py" line="789"/>
+        <source>Steam Updated: {timestamp}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_info_panel.py" line="795"/>
+        <source>Steam Updated: Invalid</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -3488,6 +3624,16 @@ Alternative Dependencies:</source>
         <source>Open folder(s) in text editor</source>
         <translation>Abrir carpetas en el editor de texto</translation>
     </message>
+    <message>
+        <location filename="../app/views/mods_panel.py" line="1985"/>
+        <source>Change mod colors</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mods_panel.py" line="1992"/>
+        <source>Reset mod colors</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>ModlistHistoryPanel</name>
@@ -3817,6 +3963,11 @@ Alternative Dependencies:</source>
     <message>
         <source>{padding}{count} new</source>
         <translation>{count} nuevo {padding}</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mods_panel.py" line="4501"/>
+        <source>0 errors</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -5346,6 +5497,52 @@ Por ejemplo, 'oels.VehicleMapFramework', alternativas: 'oels.VehiclemaPframework
         <source>Maximum number of backups to keep:</source>
         <translation>Número máximo de copias de seguridad para mantener:</translation>
     </message>
+    <message>
+        <location filename="../app/controllers/settings_tabs/locations_tab_controller.py" line="169"/>
+        <location filename="../app/controllers/settings_tabs/locations_tab_controller.py" line="179"/>
+        <source>Select Game Location</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/controllers/settings_tabs/locations_tab_controller.py" line="191"/>
+        <source>Invalid Game Location</source>
+        <translation type="unfinished">Ubicación del juego no válida</translation>
+    </message>
+    <message>
+        <location filename="../app/controllers/settings_tabs/locations_tab_controller.py" line="207"/>
+        <source>Select Config Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/controllers/settings_tabs/locations_tab_controller.py" line="218"/>
+        <source>Invalid Config Folder</source>
+        <translation type="unfinished">Carpeta de configuración no válida</translation>
+    </message>
+    <message>
+        <location filename="../app/controllers/settings_tabs/locations_tab_controller.py" line="229"/>
+        <source>Select Steam Mods Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/controllers/settings_tabs/locations_tab_controller.py" line="247"/>
+        <source>Select Local Mods Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/controllers/settings_tabs/locations_tab_controller.py" line="258"/>
+        <source>Invalid Local Mods Folder</source>
+        <translation type="unfinished">Carpeta de mods locales no válida</translation>
+    </message>
+    <message>
+        <location filename="../app/controllers/settings_tabs/locations_tab_controller.py" line="274"/>
+        <source>Clear all locations</source>
+        <translation type="unfinished">Borrar todas las ubicaciones</translation>
+    </message>
+    <message>
+        <location filename="../app/controllers/settings_tabs/locations_tab_controller.py" line="277"/>
+        <source>Are you sure you want to clear all locations?</source>
+        <translation type="unfinished">¿Está seguro de que desea borrar todas las ubicaciones?</translation>
+    </message>
 </context>
 <context>
     <name>SettingsFailureDialog</name>
@@ -6461,6 +6658,14 @@ The following table displays Workshop mods available for update from Steam.</sou
     <message>
         <location filename="../app/views/mod_collections_panel.py" line="215"/>
         <source>Delete group (keep mods)</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>FilterButton</name>
+    <message>
+        <location filename="../app/views/filter_panel.py" line="612"/>
+        <source>Filter mods</source>
         <translation type="unfinished"></translation>
     </message>
 </context>

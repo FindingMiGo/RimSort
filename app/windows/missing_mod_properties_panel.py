@@ -2,6 +2,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from loguru import logger
+from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QMessageBox
 
 from app.controllers.metadata_controller import MetadataController
@@ -101,8 +102,11 @@ class MissingModPropertiesPanel(BaseModsPanel):
 
         if not selected_indices:
             self._show_message(
-                "No Selection",
-                "Please select mods to add to the ignore list.",
+                QCoreApplication.translate("MissingModPropertiesPanel", "No Selection"),
+                QCoreApplication.translate(
+                    "MissingModPropertiesPanel",
+                    "Please select mods to add to the ignore list.",
+                ),
                 "information",
             )
             return
@@ -115,8 +119,11 @@ class MissingModPropertiesPanel(BaseModsPanel):
         except Exception as e:
             logger.error(f"Error adding mods to ignore list: {e}")
             self._show_message(
-                "Error",
-                f"Error adding mods to ignore list: {e!s}",
+                QCoreApplication.translate("MissingModPropertiesPanel", "Error"),
+                QCoreApplication.translate(
+                    "MissingModPropertiesPanel",
+                    "Error adding mods to ignore list: {error}",
+                ).format(error=str(e)),
                 "critical",
             )
 
@@ -143,8 +150,10 @@ class MissingModPropertiesPanel(BaseModsPanel):
         if not IgnoreManager.add_ignored_mods(packageids_to_add):
             logger.error("Failed to save changes to ignore list file")
             self._show_message(
-                "Error",
-                "Failed to add mods to ignore list.",
+                QCoreApplication.translate("MissingModPropertiesPanel", "Error"),
+                QCoreApplication.translate(
+                    "MissingModPropertiesPanel", "Failed to add mods to ignore list."
+                ),
                 "critical",
             )
             return False
@@ -155,8 +164,11 @@ class MissingModPropertiesPanel(BaseModsPanel):
         # Show success message
         # Parent will re-check and reload panel with fresh ignore.json data
         self._show_message(
-            "Success",
-            "Mods added to ignore list. Panel will refresh.",
+            QCoreApplication.translate("MissingModPropertiesPanel", "Success"),
+            QCoreApplication.translate(
+                "MissingModPropertiesPanel",
+                "Mods added to ignore list. Panel will refresh.",
+            ),
             "information",
         )
         return True
@@ -229,15 +241,23 @@ class MissingModPropertiesPanel(BaseModsPanel):
         """
         if skipped_mods:
             skipped_list = "<br>".join([f"• {m}" for m in skipped_mods])
-            message = (
+            message = QCoreApplication.translate(
+                "MissingModPropertiesPanel",
                 "Cannot add mods with missing Package IDs to the ignore list.<br>"
-                "These mods need valid Package IDs first:<br>" + skipped_list
+                "These mods need valid Package IDs first:<br>{mods}",
+            ).format(mods=skipped_list)
+            self._show_message(
+                QCoreApplication.translate("MissingModPropertiesPanel", "Cannot Add"),
+                message,
+                "warning",
             )
-            self._show_message("Cannot Add", message, "warning")
         else:
             self._show_message(
-                "Error",
-                "Could not extract package IDs from selected mods.",
+                QCoreApplication.translate("MissingModPropertiesPanel", "Error"),
+                QCoreApplication.translate(
+                    "MissingModPropertiesPanel",
+                    "Could not extract package IDs from selected mods.",
+                ),
                 "warning",
             )
 
@@ -252,28 +272,25 @@ class MissingModPropertiesPanel(BaseModsPanel):
             message: Message to display
             message_type: Type of message ('information', 'warning', 'critical')
         """
-        translated_title = self.tr(title)
-        translated_message = self.tr(message)
-
         if message_type == "warning":
             QMessageBox.warning(
                 self,
-                translated_title,
-                translated_message,
+                title,
+                message,
                 QMessageBox.StandardButton.Ok,
             )
         elif message_type == "critical":
             QMessageBox.critical(
                 self,
-                translated_title,
-                translated_message,
+                title,
+                message,
                 QMessageBox.StandardButton.Ok,
             )
         else:
             QMessageBox.information(
                 self,
-                translated_title,
-                translated_message,
+                title,
+                message,
                 QMessageBox.StandardButton.Ok,
             )
 
