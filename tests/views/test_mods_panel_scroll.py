@@ -116,6 +116,34 @@ def test_unchanged_tags_do_not_restart_layout(qtbot: Any) -> None:
             set_text.assert_not_called()
 
 
+def test_collection_labels_refresh_visible_and_lazy_rows(qtbot: Any) -> None:
+    with patch("app.views.mods_panel.auxdb_get_mod_tags", return_value=[]) as reads:
+        widget = make_scroll_list(qtbot, 80, True)
+        items = {f"/synthetic/mod-{index}": widget.item(index) for index in (0, 79)}
+        assert widget.itemWidget(widget.item(79)) is None
+        labels = {
+            "/synthetic/mod-0": "Gameplay / Set",
+            "/synthetic/mod-79": "Translations",
+        }
+        widget.update_collection_labels(labels, items)
+        for position in (widget.verticalScrollBar().maximum(), 0):
+            widget.verticalScrollBar().setValue(position)
+            QApplication.processEvents()
+        for path, item in items.items():
+            row = widget.itemWidget(item)
+            assert isinstance(row, ModListItemInner)
+            assert row.list_item_name == f"{row.base_mod_name} [{labels[path]}]"
+            assert row.main_label.toolTip() == row.list_item_name
+
+        widget.update_collection_labels({}, items)
+        for item in items.values():
+            row = widget.itemWidget(item)
+            assert isinstance(row, ModListItemInner)
+            assert row.list_item_name == row.base_mod_name
+            assert row.main_label.toolTip() == row.base_mod_name
+        reads.assert_not_called()
+
+
 @pytest.mark.parametrize("divider", [False, True])
 @pytest.mark.parametrize("child", [False, True])
 def test_context_menu_from_viewport(qtbot: Any, divider: bool, child: bool) -> None:

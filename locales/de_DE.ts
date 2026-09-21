@@ -6283,4 +6283,129 @@ The following table displays Workshop mods available for update from Steam.</sou
         <translation>RIMSORT konnte die gelieferte Mods -Liste nicht lesen, da sie möglicherweise ungültig oder fehlt.</translation>
     </message>
 </context>
+<context>
+    <name>ModCollectionsPanel</name>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="34"/>
+        <source>Load order</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="35"/>
+        <source>Folders and sets</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="44"/>
+        <source>Search folders, sets and mods</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="46"/>
+        <source>Active only</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_tree.py" line="21"/>
+        <source>Folder / set / mod</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_tree.py" line="22"/>
+        <source>Active / total</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_tree.py" line="23"/>
+        <source>Load position</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_tree.py" line="29"/>
+        <source>Checkboxes enable or disable all members, including hidden members. Sorting changes load positions, not membership.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="56"/>
+        <location filename="../app/views/mod_collections_panel.py" line="123"/>
+        <source>New folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="57"/>
+        <location filename="../app/views/mod_collections_panel.py" line="121"/>
+        <source>New set</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="65"/>
+        <location filename="../app/views/mod_collections_panel.py" line="72"/>
+        <location filename="../app/views/mod_collections_panel.py" line="195"/>
+        <source>Organize selected mods</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_tree.py" line="135"/>
+        <source>Not installed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_tree.py" line="88"/>
+        <source>Ungrouped</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="109"/>
+        <source>Create folder or set</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="110"/>
+        <location filename="../app/views/mod_collections_panel.py" line="231"/>
+        <source>Name:</source>
+        <translation type="unfinished">Name:</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="129"/>
+        <source>Add to set</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="134"/>
+        <location filename="../app/views/mod_collections_panel.py" line="198"/>
+        <source>Move to folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="147"/>
+        <source>Remove selected mods from groups</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="186"/>
+        <source>Enable all members</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="187"/>
+        <source>Disable all members</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="199"/>
+        <source>No folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="212"/>
+        <location filename="../app/views/mod_collections_panel.py" line="230"/>
+        <source>Rename</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="215"/>
+        <source>Delete group (keep mods)</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
 </TS>

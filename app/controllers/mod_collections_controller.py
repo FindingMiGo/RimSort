@@ -1,0 +1,161 @@
+"""Coordinate collection persistence and the authoritative mod lists."""
+
+import typing
+from pathlib import Path
+
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
+
+from app.controllers.metadata_controller import MetadataController
+from app.models.mod_collections import ModCollections, ModCollectionsSnapshot
+from app.models.settings import Settings
+from app.utils.custom_list_widget_item import CustomListWidgetItem
+from app.utils.event_bus import EventBus
+
+if typing.TYPE_CHECKING:
+    from app.views.mods_panel import ModListWidget
+
+
+class ModCollectionsController(QObject):
+    changed = Signal()
+
+    def __init__(
+        self,
+        settings: Settings,
+        metadata: MetadataController,
+        active_list: "ModListWidget",
+        inactive_list: "ModListWidget",
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.settings = settings
+        self.metadata = metadata
+        self.active_list = active_list
+        self.inactive_list = inactive_list
+        self.snapshot = ModCollectionsSnapshot()
+        self.timer = QTimer(self)
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(self.refresh)
+        for source in (active_list, inactive_list):
+            source.list_update_signal.connect(self.schedule_refresh)
+            source.model().rowsMoved.connect(self.schedule_refresh)
+        EventBus().settings_have_changed.connect(self.schedule_refresh)
+        self.schedule_refresh()
+
+    @property
+    def collections(self) -> ModCollections:
+        return self.settings.instances[self.settings.current_instance].mod_collections
+
+    @staticmethod
+    def items(source: "ModListWidget") -> dict[str, CustomListWidgetItem]:
+        return {
+            item.data(Qt.ItemDataRole.UserRole)["path"]: item
+            for item in source.get_all_mod_list_items()
+        }
+
+    def selected_paths(self, include_active: bool) -> list[str]:
+        sources = (
+            (self.active_list, self.inactive_list)
+            if include_active
+            else (self.inactive_list,)
+        )
+        return [
+            item.data(Qt.ItemDataRole.UserRole)["path"]
+            for source in sources
+            for item in source.selectedItems()
+            if not getattr(item.data(Qt.ItemDataRole.UserRole), "is_divider", False)
+        ]
+
+    def mod_name(self, path: str) -> str:
+        mod = self.metadata.get_mod(path)
+        return str(mod.name) if mod and mod.name else Path(path).name
+
+    def schedule_refresh(self, *_args: object) -> None:
+        self.timer.start(0)
+
+    def refresh(self) -> None:
+        self.timer.stop()
+        labels = self.collections.labels()
+        paths = []
+        for source in (self.active_list, self.inactive_list):
+            items = self.items(source)
+            source.update_collection_labels(labels, items)
+            paths.append(tuple(items))
+        self.snapshot = ModCollectionsSnapshot(*paths)
+        self.changed.emit()
+
+    def _save(self) -> None:
+        self.settings.save()
+        self.refresh()
+
+    def create(
+        self, kind: str, name: str, paths: list[str], selected_sets: list[str]
+    ) -> str:
+        key = self.collections.create(kind, name)
+        self.assign(paths, kind, key, selected_sets)
+        return key
+
+    def assign(
+        self,
+        paths: list[str],
+        kind: str,
+        key: str,
+        selected_sets: list[str] | None = None,
+    ) -> None:
+        collections = self.collections
+        collections.group(kind, key)
+        if kind == "set":
+            collections.assign_set(paths, key)
+        else:
+            collections.move_to_folder(paths, key)
+            for set_key in selected_sets or []:
+                collections.move_set(set_key, key)
+        self._save()
+
+    def detach(self, paths: list[str]) -> None:
+        self.collections.detach(paths)
+        self._save()
+
+    def rename(self, kind: str, key: str, name: str) -> None:
+        self.collections.rename(kind, key, name)
+        self._save()
+
+    def delete(self, kind: str, key: str) -> None:
+        self.collections.delete(kind, key)
+        self._save()
+
+    def move_set(self, key: str, folder: str) -> None:
+        self.collections.move_set(key, folder)
+        self._save()
+
+    def set_enabled(self, paths: list[str], enabled: bool) -> None:
+        source, target = (
+            (self.inactive_list, self.active_list)
+            if enabled
+            else (self.active_list, self.inactive_list)
+        )
+        requested = set(paths)
+        moving = [
+            item for path, item in self.items(source).items() if path in requested
+        ]
+        if moving:
+            updates = source.updatesEnabled(), target.updatesEnabled()
+            source.setUpdatesEnabled(False)
+            target.setUpdatesEnabled(False)
+            # Keep Qt's model notifications, but replace per-row application
+            # updates with one notification after the complete batch.
+            source.model().rowsAboutToBeRemoved.disconnect(source.handle_rows_removed)
+            try:
+                for item in moving:
+                    path = item.data(Qt.ItemDataRole.UserRole)["path"]
+                    if path in source.paths:
+                        source.paths.remove(path)
+                    source.takeItem(source.row(item))
+                    target.addItem(item)
+            finally:
+                source.model().rowsAboutToBeRemoved.connect(
+                    source.handle_rows_removed, Qt.ConnectionType.QueuedConnection
+                )
+                source.setUpdatesEnabled(updates[0])
+                target.setUpdatesEnabled(updates[1])
+            source.list_update_signal.emit(str(source.count()))
+        self.schedule_refresh()

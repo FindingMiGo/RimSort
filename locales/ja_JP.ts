@@ -6286,4 +6286,129 @@ The following table displays Workshop mods available for update from Steam.</sou
         <translation>RimSortは提供されたMODリストを読み取れませんでした。無効であるか、見つからない可能性があります。</translation>
     </message>
 </context>
+<context>
+    <name>ModCollectionsPanel</name>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="34"/>
+        <source>Load order</source>
+        <translation>ロード順</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="35"/>
+        <source>Folders and sets</source>
+        <translation>フォルダとセット</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="44"/>
+        <source>Search folders, sets and mods</source>
+        <translation>フォルダ・セット・MODを検索</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="46"/>
+        <source>Active only</source>
+        <translation>有効のみ</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_tree.py" line="21"/>
+        <source>Folder / set / mod</source>
+        <translation>フォルダ / セット / MOD</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_tree.py" line="22"/>
+        <source>Active / total</source>
+        <translation>有効 / 全体</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_tree.py" line="23"/>
+        <source>Load position</source>
+        <translation>ロード位置</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_tree.py" line="29"/>
+        <source>Checkboxes enable or disable all members, including hidden members. Sorting changes load positions, not membership.</source>
+        <translation>チェックで非表示のメンバーも含めて一括有効・無効にします。ソートしても所属は変わらず、ロード位置だけが変わります。</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="56"/>
+        <location filename="../app/views/mod_collections_panel.py" line="123"/>
+        <source>New folder</source>
+        <translation>新規フォルダ</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="57"/>
+        <location filename="../app/views/mod_collections_panel.py" line="121"/>
+        <source>New set</source>
+        <translation>新規セット</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="65"/>
+        <location filename="../app/views/mod_collections_panel.py" line="72"/>
+        <location filename="../app/views/mod_collections_panel.py" line="195"/>
+        <source>Organize selected mods</source>
+        <translation>選択したMODを整理</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_tree.py" line="135"/>
+        <source>Not installed</source>
+        <translation>未インストール</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_tree.py" line="88"/>
+        <source>Ungrouped</source>
+        <translation>未分類</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="109"/>
+        <source>Create folder or set</source>
+        <translation>フォルダ・セットを作成</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="110"/>
+        <location filename="../app/views/mod_collections_panel.py" line="231"/>
+        <source>Name:</source>
+        <translation>名前：</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="129"/>
+        <source>Add to set</source>
+        <translation>セットに追加</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="134"/>
+        <location filename="../app/views/mod_collections_panel.py" line="198"/>
+        <source>Move to folder</source>
+        <translation>フォルダへ移動</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="147"/>
+        <source>Remove selected mods from groups</source>
+        <translation>選択したMODの所属を解除</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="186"/>
+        <source>Enable all members</source>
+        <translation>メンバーを一括有効化</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="187"/>
+        <source>Disable all members</source>
+        <translation>メンバーを一括無効化</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="199"/>
+        <source>No folder</source>
+        <translation>フォルダなし</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="212"/>
+        <location filename="../app/views/mod_collections_panel.py" line="230"/>
+        <source>Rename</source>
+        <translation>名前を変更</translation>
+    </message>
+    <message>
+        <location filename="../app/views/mod_collections_panel.py" line="215"/>
+        <source>Delete group (keep mods)</source>
+        <translation>グループを削除（MODは維持）</translation>
+    </message>
+</context>
 </TS>

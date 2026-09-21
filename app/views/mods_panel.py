@@ -55,6 +55,7 @@ from PySide6.QtWidgets import (
     QProgressDialog,
     QPushButton,
     QSplitter,
+    QStackedWidget,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -64,6 +65,7 @@ from sqlalchemy import text
 
 from app.controllers.metadata_controller import MetadataController
 from app.controllers.metadata_db_controller import AuxMetadataController
+from app.controllers.mod_collections_controller import ModCollectionsController
 from app.models.divider import DividerData, generate_divider_uuid, is_divider_uuid
 from app.models.filter_state import FilterState
 from app.models.metadata.metadata_structure import AboutXmlMod, ListedMod, ModType
@@ -119,6 +121,7 @@ from app.views.dialogue import (
 )
 from app.views.divider_widget import DividerItemInner
 from app.views.filter_panel import FilterButton
+from app.views.mod_collections_panel import ModCollectionsPanel
 
 
 class ModListItemInner(QWidget):
@@ -209,6 +212,7 @@ class ModListItemInner(QWidget):
         if not isinstance(name_value, str):
             name_value = "name error in mod about.xml"
         self.list_item_name = name_value
+        self.base_mod_name = name_value
         self.main_label = QLabel()
         self.mod_tags_label = QLabel()
         self.mod_tags_label.setObjectName("ListItemTagsLabel")
@@ -665,6 +669,16 @@ class ModListItemInner(QWidget):
         Repolish the widget items
         """
         item_data = item.data(Qt.ItemDataRole.UserRole)
+        collection_name = item_data.__dict__.get("collection_name", "")
+        name = (
+            f"{self.base_mod_name} [{collection_name}]"
+            if collection_name
+            else self.base_mod_name
+        )
+        if name != self.list_item_name:
+            self.list_item_name = name
+            self.main_label.setToolTip(name)
+            self._resize_text_after_icon_toggle()
         error_tooltip = item_data["errors"]
         warning_tooltip = item_data["warnings"]
 
@@ -2865,6 +2879,19 @@ class ModListWidget(QListWidget):
         item.setData(Qt.ItemDataRole.UserRole, data, avoid_emit=True)
         self.addItem(item)
 
+    def update_collection_labels(
+        self, labels: dict[str, str], items: dict[str, CustomListWidgetItem]
+    ) -> None:
+        """Refresh only changed membership labels, including lazily created rows."""
+        for path, item in items.items():
+            data = item.data(Qt.ItemDataRole.UserRole)
+            label = labels.get(path, "")
+            if data.__dict__.get("collection_name", "") != label:
+                data.__dict__["collection_name"] = label
+                widget = self.itemWidget(item)
+                if isinstance(widget, ModListItemInner):
+                    widget.repolish(item)
+
     def get_all_mod_list_items(self) -> list[CustomListWidgetItem]:
         """
         This gets all modlist items (excludes dividers).
@@ -4392,7 +4419,37 @@ class ModsPanel(QWidget):
         # Set the main layout for the widget
         self.setLayout(self.panel)
 
+        self.initialize_mod_collections()
+
         logger.debug("Finished ModsPanel initialization")
+
+    def initialize_mod_collections(self) -> None:
+        controller = ModCollectionsController(
+            self.settings,
+            self.metadata_controller,
+            self.active_mods_list,
+            self.inactive_mods_list,
+            self,
+        )
+        self.collections_panel = ModCollectionsPanel(controller, self)
+        self.active_panel.removeWidget(self.active_mods_list)
+        self.collections_stack = QStackedWidget()
+        self.collections_stack.addWidget(self.active_mods_list)
+        self.collections_stack.addWidget(self.collections_panel)
+        self.active_panel.insertWidget(2, self.collections_panel.mode)
+        self.active_panel.insertWidget(3, self.collections_stack)
+        self.button_panel.addWidget(self.collections_panel.organize_button)
+        self.collections_panel.mode.currentIndexChanged.connect(
+            self.on_collections_mode_changed
+        )
+
+    def on_collections_mode_changed(self, index: int) -> None:
+        self.collections_stack.setCurrentIndex(index)
+        for i in range(self.active_mods_search_layout.count()):
+            layout_item = self.active_mods_search_layout.itemAt(i)
+            widget = layout_item.widget() if layout_item else None
+            if widget:
+                widget.setVisible(index == 0)
 
     def initialize_active_mods_search_widgets(self) -> None:
         """Initialize widgets for active mods search layout."""
