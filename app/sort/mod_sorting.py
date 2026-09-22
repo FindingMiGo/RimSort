@@ -233,11 +233,13 @@ def _entry_is_link(entry: Any) -> bool:
     """
     is_reparse_point = getattr(entry, "is_reparse_point", None)
     if callable(is_reparse_point):
-        return bool(is_reparse_point())
+        reparse_result = is_reparse_point()
+        if isinstance(reparse_result, bool):
+            return reparse_result
     is_symlink = getattr(entry, "is_symlink", None)
     if callable(is_symlink):
         try:
-            if is_symlink():
+            if is_symlink() is True:
                 return True
         except OSError:
             pass
@@ -263,10 +265,6 @@ def get_dir_size(path: str) -> int:
                 if entry.is_file():
                     total += entry.stat().st_size
                 elif entry.is_dir():
-                    resolved = os.path.normcase(os.path.realpath(entry.path))
-                    if resolved in visited:
-                        continue
-                    visited.add(resolved)
                     stack.append(entry.path)
         except OSError:
             pass  # Skip file
