@@ -38,6 +38,7 @@ class ModCollectionsController(QObject):
         for source in (active_list, inactive_list):
             source.list_update_signal.connect(self.schedule_refresh)
             source.model().rowsMoved.connect(self.schedule_refresh)
+            source.create_set_from_drop_signal.connect(self.create_set_from_drop)
         EventBus().settings_have_changed.connect(self.schedule_refresh)
         self.schedule_refresh()
 
@@ -110,6 +111,19 @@ class ModCollectionsController(QObject):
             for set_key in selected_sets or []:
                 collections.move_set(set_key, key)
         self._save()
+
+    def create_set_from_drop(self, paths: list[str], target_path: str) -> None:
+        """Create a set, or add dropped mods to the target mod's existing set."""
+        key = self.collections.set_for(target_path)
+        if key:
+            self.assign(paths, "set", key)
+            return
+        self.create(
+            "set",
+            self.mod_name(target_path),
+            [target_path, *paths],
+            [],
+        )
 
     def detach(self, paths: list[str]) -> None:
         self.collections.detach(paths)

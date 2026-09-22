@@ -88,6 +88,35 @@ def first_group(view: ModCollectionsPanel) -> QTreeWidgetItem:
     return node
 
 
+def test_drop_mod_onto_mod_creates_and_extends_set(
+    collections_panel: ModsPanel,
+) -> None:
+    source = collections_panel.inactive_mods_list
+    controller = collections_panel.collections_panel.controller
+    paths = list(controller.items(source))
+    original_order = list(source.paths)
+
+    source.item(0).setSelected(True)
+    assert source._request_set_from_drop(source.item(1))
+
+    key = controller.collections.set_for(paths[1])
+    assert key
+    assert controller.collections.sets[key].name == controller.mod_name(paths[1])
+    assert controller.collections.sets[key].members == [paths[1], paths[0]]
+    assert source.paths == original_order
+
+    source.clearSelection()
+    source.item(2).setSelected(True)
+    assert source._request_set_from_drop(source.item(1))
+    assert controller.collections.sets[key].members == [paths[1], paths[0], paths[2]]
+
+
+def test_drop_requires_a_different_selected_mod(collections_panel: ModsPanel) -> None:
+    source = collections_panel.inactive_mods_list
+    source.item(0).setSelected(True)
+    assert not source._request_set_from_drop(source.item(0))
+
+
 def test_batch_activation_preserves_order_and_tree_membership(
     collections_panel: ModsPanel,
 ) -> None:

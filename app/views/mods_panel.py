@@ -1143,6 +1143,8 @@ class ModListIcons:
 class ModListWidget(QListWidget):
     _LAZY_WIDGET_BATCH_SIZE = 3
 
+    create_set_from_drop_signal = Signal(list, str)
+
     """
     Subclass for QListWidget. Used to store lists for
     active and inactive mods. Mods can be rearranged within
@@ -1348,8 +1350,19 @@ class ModListWidget(QListWidget):
         return cast(CustomListWidgetItem, widget)
 
     def dropEvent(self, event: QDropEvent) -> None:
-        super().dropEvent(event)
         source_widget = event.source()
+        target_item = self.itemAt(event.position().toPoint())
+        if (
+            source_widget == self
+            and self.dropIndicatorPosition()
+            == QAbstractItemView.DropIndicatorPosition.OnItem
+            and isinstance(target_item, CustomListWidgetItem)
+            and self._request_set_from_drop(target_item)
+        ):
+            event.acceptProposedAction()
+            return
+
+        super().dropEvent(event)
         drop_action = event.dropAction()
         # Only manipulate paths for within-list reorder (same source and dest).
         # For cross-list drops, handle_rows_inserted (queued) handles path
@@ -1374,6 +1387,26 @@ class ModListWidget(QListWidget):
         # from handle_rows_inserted once the queued insertion completes.
         if source_widget == self:
             self.list_update_signal.emit("drop")
+
+    def _request_set_from_drop(self, target_item: CustomListWidgetItem | None) -> bool:
+        """Create or extend a set when selected mods are dropped onto a mod."""
+        if target_item is None:
+            return False
+        target_data = target_item.data(Qt.ItemDataRole.UserRole)
+        if target_data is None or getattr(target_data, "is_divider", False):
+            return False
+        target_path = target_data["path"]
+        selected_paths = [
+            data["path"]
+            for item in self.selectedItems()
+            if (data := item.data(Qt.ItemDataRole.UserRole)) is not None
+            and not getattr(data, "is_divider", False)
+            and data["path"] != target_path
+        ]
+        if not selected_paths:
+            return False
+        self.create_set_from_drop_signal.emit(selected_paths, target_path)
+        return True
 
     def _get_selected_metadata(self) -> list[dict[str, Any]]:
         selected_items = self.selectedItems()
