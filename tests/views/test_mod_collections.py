@@ -117,6 +117,10 @@ def test_drop_mod_onto_mod_creates_and_extends_set(
     source.toggle_divider_collapse(header_data.uuid)
     assert not source.item(1).isHidden()
     assert not source.item(2).isHidden()
+    assert source.item(1).text().startswith("Mod ")
+    QApplication.processEvents()
+    assert source.itemWidget(source.item(1)) is not None
+    assert source.item(1).text() == ""
 
     source.clearSelection()
     header.setSelected(True)

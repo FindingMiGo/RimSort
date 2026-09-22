@@ -3372,6 +3372,8 @@ class ModListWidget(QListWidget):
         for i in range(idx + 1, next_div):
             self.item(i).setHidden(data.collapsed)
         self._update_single_divider_mod_count(item)
+        if set_key and not data.collapsed:
+            self.check_widgets_visible()
 
     def _find_next_divider_index(self, start: int) -> int:
         for i in range(start, self.count()):
@@ -3520,6 +3522,7 @@ class ModListWidget(QListWidget):
             )
             self.setUpdatesEnabled(updates_enabled)
         self.apply_collapse_states()
+        self.check_widgets_visible()
         self.viewport().update()
 
     def restore_dividers(self, dividers: list[dict[str, Any]]) -> None:
