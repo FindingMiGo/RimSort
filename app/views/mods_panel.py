@@ -1,4 +1,5 @@
 import os
+from collections import deque
 from datetime import datetime
 from difflib import SequenceMatcher
 from functools import partial
@@ -1238,6 +1239,10 @@ class ModListWidget(QListWidget):
 
         # Lazy load ModListItemInner
         self.verticalScrollBar().valueChanged.connect(self.check_widgets_visible)
+        self._visible_widget_queue: deque[CustomListWidgetItem] = deque()
+        self._visible_widget_timer = QTimer(self)
+        self._visible_widget_timer.setSingleShot(True)
+        self._visible_widget_timer.timeout.connect(self._load_next_visible_widget)
 
         # This set is used to keep track of mods that have been loaded
         # into widgets. Used for an optimization strategy for `handle_rows_inserted`
@@ -2986,13 +2991,38 @@ class ModListWidget(QListWidget):
             widget.repolish(item)
 
     def check_widgets_visible(self) -> None:
-        # This function checks the visibility of each item and creates a widget if the item is visible and not already setup.
-        indexes = self.get_visible_indexes()
-        for idx in indexes:
+        """Queue missing visible row widgets without blocking the event loop.
+
+        QWidget instances must be created on the GUI thread.  Creating every
+        newly visible row in this scroll callback makes input and painting wait
+        for the whole batch, so create one row per event-loop turn instead.
+        Replacing the queue also prevents a fast scroll from continuing to load
+        rows that have already moved off screen.
+        """
+        queued_items: deque[CustomListWidgetItem] = deque()
+        for idx in sorted(self.get_visible_indexes()):
             item = self.item(idx)
-            # Check for visible item without a widget set
-            if item and self.itemWidget(item) is None:
+            if isinstance(item, CustomListWidgetItem) and self.itemWidget(item) is None:
+                queued_items.append(item)
+
+        self._visible_widget_queue = queued_items
+        if queued_items and not self._visible_widget_timer.isActive():
+            self._visible_widget_timer.start(0)
+
+    def _load_next_visible_widget(self) -> None:
+        """Create one queued row and yield back to Qt before continuing."""
+        while self._visible_widget_queue:
+            item = self._visible_widget_queue.popleft()
+            if (
+                self.row(item) >= 0
+                and self.itemWidget(item) is None
+                and self.check_item_visible(item)
+            ):
                 self.create_widget_for_item(item)
+                break
+
+        if self._visible_widget_queue:
+            self._visible_widget_timer.start(0)
 
     def get_visible_indexes(self) -> set[int]:
         """This function returns the set of indexes for items that are currently visible in the viewport."""

@@ -213,6 +213,7 @@ def test_empty_set_can_move_between_folders(collections_panel: ModsPanel) -> Non
 
 def test_search_filters_existing_nodes_without_reloading_metadata(
     collections_panel: ModsPanel,
+    qtbot: QtBot,
 ) -> None:
     view, _key, paths = grouped_view(collections_panel)
     controller = view.controller
@@ -230,6 +231,13 @@ def test_search_filters_existing_nodes_without_reloading_metadata(
     metadata = collections_panel.metadata_controller
     get_mod = metadata.get_mod
     assert isinstance(get_mod, MagicMock)
+    qtbot.waitUntil(
+        lambda: (
+            not collections_panel.active_mods_list._visible_widget_queue
+            and not collections_panel.inactive_mods_list._visible_widget_queue
+        ),
+        timeout=1000,
+    )
     get_mod.reset_mock()
     view.search.setText("translations")
     view.active_only.setChecked(True)

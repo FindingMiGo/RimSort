@@ -95,6 +95,28 @@ def test_cached_tags_used_when_scrolling(
         assert row_widget.mod_tags_label.isHidden() == (not tags or not mod_tags)
 
 
+def test_visible_rows_are_loaded_one_per_event_loop_turn(qtbot: Any) -> None:
+    widget = make_scroll_list(qtbot, 80, True)
+    bar = widget.verticalScrollBar()
+
+    with patch.object(
+        widget,
+        "create_widget_for_item",
+        wraps=widget.create_widget_for_item,
+    ) as create:
+        bar.setValue(bar.maximum())
+
+        # The scroll handler only schedules work, so it cannot monopolize the
+        # input event that moved the scrollbar.
+        create.assert_not_called()
+        assert len(widget._visible_widget_queue) > 1
+
+        widget._visible_widget_timer.stop()
+        widget._load_next_visible_widget()
+        assert create.call_count == 1
+        assert widget._visible_widget_timer.isActive()
+
+
 @pytest.mark.parametrize("replace", [False, True])
 def test_tag_cache_isolated_from_caller_mutation(qtbot: Any, replace: bool) -> None:
     tags = ["initial"]
@@ -222,7 +244,10 @@ def test_collection_labels_refresh_visible_and_lazy_rows(qtbot: Any) -> None:
         widget.update_collection_labels(labels, items)
         for position in (widget.verticalScrollBar().maximum(), 0):
             widget.verticalScrollBar().setValue(position)
-            QApplication.processEvents()
+            qtbot.waitUntil(
+                lambda: not widget._visible_widget_queue,
+                timeout=1000,
+            )
         for path, item in items.items():
             row = widget.itemWidget(item)
             assert isinstance(row, ModListItemInner)
