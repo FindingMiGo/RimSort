@@ -115,6 +115,26 @@ def test_tag_cache_isolated_from_caller_mutation(qtbot: Any, replace: bool) -> N
         reads.assert_not_called()
 
 
+def test_tag_label_is_parented_before_it_is_shown(qtbot: Any) -> None:
+    original_update = ModListItemInner.update_tags_label
+
+    def assert_parented_before_update(
+        row: ModListItemInner, tags: list[str] | None = None
+    ) -> None:
+        assert row.mod_tags_label.parentWidget() is row
+        original_update(row, tags)
+
+    with (
+        patch("app.views.mods_panel.auxdb_get_mod_tags", return_value=[]),
+        patch.object(
+            ModListItemInner,
+            "update_tags_label",
+            assert_parented_before_update,
+        ),
+    ):
+        make_scroll_list(qtbot, 1, True)
+
+
 def test_tag_edits_refresh_row_and_tooltip(qtbot: Any) -> None:
     with patch("app.views.mods_panel.auxdb_get_mod_tags", return_value=[]) as reads:
         widget = make_scroll_list(qtbot, 1, True)

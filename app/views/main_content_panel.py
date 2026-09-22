@@ -23,6 +23,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QFrame,
     QHBoxLayout,
     QInputDialog,
@@ -90,6 +91,7 @@ from app.utils.zip_extractor import (
     get_zip_contents,
 )
 from app.views import dialogue
+from app.views.merge_preview_dialog import MergePreviewDialog
 from app.views.mod_info_panel import ModInfoPanel
 from app.views.mods_panel import (
     ModListWidget,
@@ -210,6 +212,7 @@ class MainContent(QObject):
         EventBus().do_import_mod_list_from_save_file.connect(
             self._do_import_list_from_save_file
         )
+        EventBus().do_merge_mod_list_from_file.connect(self._do_merge_list_file_xml)
         EventBus().do_save_mod_list_as.connect(self._do_export_list_file_xml)
         EventBus().do_export_mod_list_to_clipboard.connect(
             self._do_export_list_clipboard
@@ -1303,6 +1306,72 @@ class MainContent(QObject):
             self.__missing_mods_prompt()
         else:
             logger.info("USER ACTION: pressed cancel, passing")
+
+    def _do_merge_list_file_xml(self) -> None:
+        """Preview, merge, and sort mods from an external mod list."""
+        logger.info("Opening file dialog to select mod list for merge")
+        file_path = dialogue.show_dialogue_file(
+            mode="open",
+            caption="Select mod list to merge",
+            _dir=str(AppInfo().saved_modlists_folder),
+            _filter="RimWorld mod list (*.rml *.rws *.xml)",
+        )
+        if not file_path:
+            logger.info("USER ACTION: cancelled mod list merge")
+            return
+
+        self.mods_panel.reset_all_filters_and_search("Active")
+        self.mods_panel.reset_all_filters_and_search("Inactive")
+        try:
+            parsed = parse_mod_list_file(file_path)
+        except ModListFormatError as exc:
+            dialogue.show_warning(
+                title=self.tr("Merge failed"),
+                text=self.tr("Could not read the selected mod list file."),
+                information=str(exc),
+            )
+            return
+
+        (
+            imported_active,
+            _imported_inactive,
+            duplicate_mods,
+            missing_mods,
+        ) = self.metadata_controller.get_mods_from_list(parsed.package_ids)
+        current_active = list(self.mods_panel.active_mods_list.paths)
+        current_active_set = {
+            uuid for uuid in current_active if not is_divider_uuid(uuid)
+        }
+        new_mods = [uuid for uuid in imported_active if uuid not in current_active_set]
+        already_present = [
+            uuid for uuid in imported_active if uuid in current_active_set
+        ]
+        preview = MergePreviewDialog(
+            new_mods=new_mods,
+            already_present=already_present,
+            missing_packageids=missing_mods,
+            source_filename=Path(file_path).name,
+            total_imported=len(parsed.package_ids),
+            parent=self.main_layout_frame,
+            metadata_controller=self.metadata_controller,
+        )
+        if preview.exec() != QDialog.DialogCode.Accepted:
+            logger.info("USER ACTION: cancelled merge preview")
+            return
+
+        merged_active = current_active + new_mods
+        merged_set = {uuid for uuid in merged_active if not is_divider_uuid(uuid)}
+        updated_inactive = [
+            uuid
+            for uuid in self.metadata_controller.mods_metadata
+            if uuid not in merged_set
+        ]
+        self.duplicate_mods = duplicate_mods
+        self.missing_mods = missing_mods
+        self._insert_data_into_lists(merged_active, updated_inactive)
+        self._do_sort()
+        self.__duplicate_mods_prompt()
+        self.__missing_mods_prompt()
 
     def _do_export_list_file_xml(self) -> None:
         """
