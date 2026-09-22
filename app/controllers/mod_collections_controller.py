@@ -17,7 +17,6 @@ if typing.TYPE_CHECKING:
 
 class ModCollectionsController(QObject):
     changed = Signal()
-    set_created_from_drop = Signal(str)
 
     def __init__(
         self,
@@ -40,6 +39,12 @@ class ModCollectionsController(QObject):
             source.list_update_signal.connect(self.schedule_refresh)
             source.model().rowsMoved.connect(self.schedule_refresh)
             source.create_set_from_drop_signal.connect(self.create_set_from_drop)
+            source.rename_collection_set_signal.connect(
+                lambda key, name: self.rename("set", key, name)
+            )
+            source.delete_collection_set_signal.connect(
+                lambda key: self.delete("set", key)
+            )
         EventBus().settings_have_changed.connect(self.schedule_refresh)
         self.schedule_refresh()
 
@@ -83,6 +88,8 @@ class ModCollectionsController(QObject):
             source.update_collection_labels(labels, items)
             paths.append(tuple(items))
         self.snapshot = ModCollectionsSnapshot(*paths)
+        for source in (self.active_list, self.inactive_list):
+            source.apply_collection_sets(self.collections)
         self.changed.emit()
 
     def _save(self) -> None:
@@ -118,15 +125,13 @@ class ModCollectionsController(QObject):
         key = self.collections.set_for(target_path)
         if key:
             self.assign(paths, "set", key)
-            self.set_created_from_drop.emit(key)
             return
-        key = self.create(
+        self.create(
             "set",
             self.mod_name(target_path),
             [target_path, *paths],
             [],
         )
-        self.set_created_from_drop.emit(key)
 
     def detach(self, paths: list[str]) -> None:
         self.collections.detach(paths)

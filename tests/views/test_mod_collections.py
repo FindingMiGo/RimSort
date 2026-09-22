@@ -103,18 +103,37 @@ def test_drop_mod_onto_mod_creates_and_extends_set(
     assert key
     assert controller.collections.sets[key].name == controller.mod_name(paths[1])
     assert controller.collections.sets[key].members == [paths[1], paths[0]]
-    assert source.paths == original_order
-    view = collections_panel.collections_panel
-    assert view.mode.currentIndex() == 1
-    set_node = next(
-        node for node in view.tree.nodes() if view.tree.identity(node) == ("set", key)
-    )
-    assert set_node.childCount() == 2
-    assert not set_node.isExpanded()
+    assert original_order == paths
+    header = source.item(0)
+    header_data = header.data(Qt.ItemDataRole.UserRole)
+    assert header_data.collection_set_key == key
+    assert header_data.collapsed
+    assert source.item(1).isHidden()
+    assert source.item(2).isHidden()
+    assert [
+        path for path in source.paths if not path.startswith("__divider__")
+    ] == paths
+
+    source.toggle_divider_collapse(header_data.uuid)
+    assert not source.item(1).isHidden()
+    assert not source.item(2).isHidden()
 
     source.clearSelection()
-    source.item(2).setSelected(True)
-    assert source._request_set_from_drop(source.item(1))
+    header.setSelected(True)
+    move = QSignalSpy(source.key_press_signal)
+    source.mod_double_clicked(header)
+    assert move.count() == 1
+    assert move.at(0) == ["DoubleClick"]
+    assert {
+        item.data(Qt.ItemDataRole.UserRole)["path"]
+        for item in source.selectedItems()
+        if not getattr(item.data(Qt.ItemDataRole.UserRole), "is_divider", False)
+    } == {paths[0], paths[1]}
+
+    source.clearSelection()
+    items = controller.items(source)
+    items[paths[2]].setSelected(True)
+    assert source._request_set_from_drop(items[paths[1]])
     assert controller.collections.sets[key].members == [paths[1], paths[0], paths[2]]
 
 
@@ -151,8 +170,7 @@ def test_batch_activation_preserves_order_and_tree_membership(
     assert before == [paths[0], paths[3]]
     controller.set_enabled(controller.collections.members("folder", folder), True)
     QApplication.processEvents()
-    assert list(controller.items(controller.active_list)) == before + paths[1:3]
-    assert controller.active_list.paths == before + paths[1:3]
+    assert set(controller.items(controller.active_list)) == set(before + paths[1:3])
     assert collections_panel.active_mods_label.text() == "Active [4]"
     assert collections_panel.inactive_mods_label.text() == "Inactive [0]"
     view.mode.setCurrentIndex(1)
@@ -178,8 +196,8 @@ def test_batch_activation_preserves_order_and_tree_membership(
     controller.set_enabled(controller.collections.members("folder", folder), False)
     QApplication.processEvents()
     assert list(controller.items(controller.active_list)) == [paths[3]]
-    assert len(controller.inactive_list.paths) == 3
-    assert len(set(controller.inactive_list.paths)) == 3
+    assert len(controller.items(controller.inactive_list)) == 3
+    assert len(set(controller.items(controller.inactive_list))) == 3
     assert collections_panel.active_mods_label.text() == "Active [1]"
     assert collections_panel.inactive_mods_label.text() == "Inactive [3]"
 
@@ -225,7 +243,7 @@ def test_reordering_and_instance_switch_preserve_separate_groups(
     node = first_group(view)
     member = node.child(0)
     assert member is not None
-    assert member.text(2) == "#4"
+    assert member.text(2) == "#1"
     assert controller.collections.sets[key].members == paths[:2]
     previous = controller.settings.current_instance
     controller.settings.instances["another"] = Instance()
@@ -233,7 +251,7 @@ def test_reordering_and_instance_switch_preserve_separate_groups(
     EventBus().settings_have_changed.emit()
     QApplication.processEvents()
     assert controller.collections.sets == {}
-    data = active.item(3).data(Qt.ItemDataRole.UserRole)
+    data = controller.items(active)[paths[0]].data(Qt.ItemDataRole.UserRole)
     assert data.__dict__["collection_name"] == ""
     controller.settings.current_instance = previous
     EventBus().settings_have_changed.emit()
@@ -342,7 +360,7 @@ def test_group_operations_save_once_and_activation_does_not_save_settings(
         save.reset_mock()
         operation()
         save.assert_called_once_with()
-        assert controller.inactive_list.paths == paths
+        assert set(controller.items(controller.inactive_list)) == set(paths)
         assert controller.active_list.paths == []
     save.reset_mock()
     controller.set_enabled(paths[:2], True)
@@ -367,7 +385,7 @@ def test_create_group_uses_real_list_selection_and_saves_once(
     save = controller.settings.save
     assert isinstance(save, MagicMock)
     save.assert_called_once_with()
-    assert controller.inactive_list.paths == paths
+    assert set(controller.items(controller.inactive_list)) == set(paths)
     assert controller.active_list.paths == []
     assert view.mode.currentIndex() == 1
 

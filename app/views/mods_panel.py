@@ -55,7 +55,6 @@ from PySide6.QtWidgets import (
     QProgressDialog,
     QPushButton,
     QSplitter,
-    QStackedWidget,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -66,9 +65,15 @@ from sqlalchemy import text
 from app.controllers.metadata_controller import MetadataController
 from app.controllers.metadata_db_controller import AuxMetadataController
 from app.controllers.mod_collections_controller import ModCollectionsController
-from app.models.divider import DividerData, generate_divider_uuid, is_divider_uuid
+from app.models.divider import (
+    DIVIDER_UUID_PREFIX,
+    DividerData,
+    generate_divider_uuid,
+    is_divider_uuid,
+)
 from app.models.filter_state import FilterState
 from app.models.metadata.metadata_structure import AboutXmlMod, ListedMod, ModType
+from app.models.mod_collections import ModCollections
 from app.models.settings import Settings
 from app.sort.mod_sorting import (
     _FOLDER_SIZE_CACHE,
@@ -1144,6 +1149,8 @@ class ModListWidget(QListWidget):
     _LAZY_WIDGET_BATCH_SIZE = 3
 
     create_set_from_drop_signal = Signal(list, str)
+    rename_collection_set_signal = Signal(str, str)
+    delete_collection_set_signal = Signal(str)
 
     """
     Subclass for QListWidget. Used to store lists for
@@ -1258,6 +1265,7 @@ class ModListWidget(QListWidget):
         self.ignore_warning_list: list[str] = []
         # Cache of latest save package ids to check new mods
         self._latest_save_package_ids: set[str] | None = None
+        self._expanded_collection_sets: set[str] = set()
 
         # Translation status
         self.show_translation_status: bool = False
@@ -3035,6 +3043,8 @@ class ModListWidget(QListWidget):
             # delegate paint the same title underneath the widget.
             item.setText("")
             self.setItemWidget(item, widget)
+            if data.__dict__.get("collection_child", False):
+                widget.main_item_layout.setContentsMargins(24, 0, 0, 0)
 
             # Apply translation status if enabled
             if self.show_translation_status:
@@ -3263,12 +3273,17 @@ class ModListWidget(QListWidget):
         pos_local: Any,
     ) -> bool:
         menu = QMenu()
-        rename_action = menu.addAction(self.tr("Rename divider"))
+        set_key = getattr(data, "collection_set_key", "")
+        rename_action = menu.addAction(
+            self.tr("Rename set") if set_key else self.tr("Rename divider")
+        )
         toggle_action = menu.addAction(
             self.tr("Expand") if data.collapsed else self.tr("Collapse")
         )
         menu.addSeparator()
-        delete_action = menu.addAction(self.tr("Delete divider"))
+        delete_action = menu.addAction(
+            self.tr("Delete set (keep mods)") if set_key else self.tr("Delete divider")
+        )
         action = menu.exec_(self.mapToGlobal(pos_local))
         if action == rename_action:
             new_name, ok = QInputDialog.getText(
@@ -3278,11 +3293,17 @@ class ModListWidget(QListWidget):
                 text=data.name,
             )
             if ok and new_name.strip():
-                self.rename_divider(data.uuid, new_name.strip())
+                if set_key:
+                    self.rename_collection_set_signal.emit(set_key, new_name.strip())
+                else:
+                    self.rename_divider(data.uuid, new_name.strip())
         elif action == toggle_action:
             self.toggle_divider_collapse(data.uuid)
         elif action == delete_action:
-            self.remove_divider(data.uuid)
+            if set_key:
+                self.delete_collection_set_signal.emit(set_key)
+            else:
+                self.remove_divider(data.uuid)
         return True
 
     def add_divider(self, index: int, name: str) -> None:
@@ -3335,11 +3356,19 @@ class ModListWidget(QListWidget):
         item = self.item(idx)
         data = item.data(Qt.ItemDataRole.UserRole)
         data.collapsed = not data.collapsed
+        set_key = getattr(data, "collection_set_key", "")
+        if set_key:
+            if data.collapsed:
+                self._expanded_collection_sets.discard(set_key)
+            else:
+                self._expanded_collection_sets.add(set_key)
         item.setData(Qt.ItemDataRole.UserRole, data, avoid_emit=True)
         widget = self.itemWidget(item)
         if isinstance(widget, DividerItemInner):
             widget.set_collapsed(data.collapsed)
         next_div = self._find_next_divider_index(idx + 1)
+        if set_key:
+            next_div = min(self.count(), idx + 1 + data.collection_member_count)
         for i in range(idx + 1, next_div):
             self.item(i).setHidden(data.collapsed)
         self._update_single_divider_mod_count(item)
@@ -3355,8 +3384,11 @@ class ModListWidget(QListWidget):
         idx = self.row(item)
         if idx < 0:
             return
-        next_div = self._find_next_divider_index(idx + 1)
-        count = next_div - idx - 1
+        data = item.data(Qt.ItemDataRole.UserRole)
+        count = getattr(data, "collection_member_count", 0)
+        if not count:
+            next_div = self._find_next_divider_index(idx + 1)
+            count = next_div - idx - 1
         widget = self.itemWidget(item)
         if isinstance(widget, DividerItemInner):
             widget.set_mod_count(count)
@@ -3365,23 +3397,35 @@ class ModListWidget(QListWidget):
         for i in range(self.count()):
             item = self.item(i)
             data = item.data(Qt.ItemDataRole.UserRole)
-            if getattr(data, "is_divider", False):
+            if getattr(data, "is_divider", False) and not getattr(
+                data, "collection_set_key", ""
+            ):
                 self._update_single_divider_mod_count(item)
 
     def apply_collapse_states(self) -> None:
         """Hide/show items according to their preceding divider's collapsed state."""
         collapsed = False
+        collection_remaining = 0
+        collection_collapsed = False
         for i in range(self.count()):
             item = self.item(i)
             data = item.data(Qt.ItemDataRole.UserRole)
             if getattr(data, "is_divider", False):
                 collapsed = data.collapsed
+                collection_remaining = getattr(data, "collection_member_count", 0)
+                collection_collapsed = bool(collection_remaining and data.collapsed)
+                if collection_remaining:
+                    collapsed = False
                 widget = self.itemWidget(item)
                 if isinstance(widget, DividerItemInner):
-                    widget.set_collapsed(collapsed)
+                    widget.set_collapsed(data.collapsed)
             else:
                 hidden_by_filter = getattr(data, "hidden_by_filter", False)
-                item.setHidden(collapsed or hidden_by_filter)
+                item.setHidden(collapsed or collection_collapsed or hidden_by_filter)
+                if collection_remaining:
+                    collection_remaining -= 1
+                    if not collection_remaining:
+                        collection_collapsed = False
         self._update_divider_mod_counts()
 
     def get_dividers_data(self) -> list[dict[str, Any]]:
@@ -3400,6 +3444,83 @@ class ModListWidget(QListWidget):
                     }
                 )
         return result
+
+    def apply_collection_sets(self, collections: ModCollections) -> None:
+        """Render sets as compact, collapsible groups in the ordinary list."""
+        try:
+            self.model().rowsInserted.disconnect(self.handle_rows_inserted)
+        except TypeError:
+            pass
+        try:
+            self.model().rowsAboutToBeRemoved.disconnect(self.handle_rows_removed)
+        except TypeError:
+            pass
+        updates_enabled = self.updatesEnabled()
+        self.setUpdatesEnabled(False)
+        try:
+            for row in range(self.count() - 1, -1, -1):
+                item = self.item(row)
+                data = item.data(Qt.ItemDataRole.UserRole)
+                if getattr(data, "collection_set_key", ""):
+                    self.takeItem(row)
+            self.paths = [
+                self.item(row).data(Qt.ItemDataRole.UserRole)["path"]
+                for row in range(self.count())
+            ]
+
+            for item in self.get_all_mod_list_items():
+                data = item.data(Qt.ItemDataRole.UserRole)
+                data.__dict__["collection_child"] = False
+                item.setHidden(False)
+
+            for key, group in collections.sets.items():
+                member_items = [
+                    self.item(self.paths.index(path))
+                    for path in group.members
+                    if path in self.paths
+                ]
+                if len(member_items) < 2:
+                    continue
+                insertion = min(self.row(item) for item in member_items)
+                ordered = sorted(member_items, key=self.row)
+                for item in reversed(ordered):
+                    row = self.row(item)
+                    self.takeItem(row)
+                    self.paths.pop(row)
+
+                header_uuid = f"{DIVIDER_UUID_PREFIX}set_{key}"
+                collapsed = key not in self._expanded_collection_sets
+                header_data = DividerData(
+                    header_uuid,
+                    group.name,
+                    collapsed=collapsed,
+                    collection_set_key=key,
+                    collection_member_count=len(ordered),
+                )
+                header = CustomListWidgetItem()
+                header.setData(Qt.ItemDataRole.UserRole, header_data, avoid_emit=True)
+                self.insertItem(insertion, header)
+                self.paths.insert(insertion, header_uuid)
+                self.create_widget_for_item(header)
+                for offset, item in enumerate(ordered, 1):
+                    data = item.data(Qt.ItemDataRole.UserRole)
+                    data.__dict__["collection_child"] = True
+                    self.insertItem(insertion + offset, item)
+                    self.paths.insert(insertion + offset, data["path"])
+                    item.setHidden(collapsed)
+                    widget = self.itemWidget(item)
+                    if isinstance(widget, ModListItemInner):
+                        widget.main_item_layout.setContentsMargins(24, 0, 0, 0)
+        finally:
+            self.model().rowsInserted.connect(
+                self.handle_rows_inserted, Qt.ConnectionType.QueuedConnection
+            )
+            self.model().rowsAboutToBeRemoved.connect(
+                self.handle_rows_removed, Qt.ConnectionType.QueuedConnection
+            )
+            self.setUpdatesEnabled(updates_enabled)
+        self.apply_collapse_states()
+        self.viewport().update()
 
     def restore_dividers(self, dividers: list[dict[str, Any]]) -> None:
         """Re-insert dividers at saved positions after a list rebuild."""
@@ -3469,6 +3590,13 @@ class ModListWidget(QListWidget):
         """
         data = item.data(Qt.ItemDataRole.UserRole)
         if getattr(data, "is_divider", False):
+            if getattr(data, "collection_set_key", ""):
+                idx = self.row(item)
+                end = min(self.count(), idx + 1 + data.collection_member_count)
+                for row in range(idx + 1, end):
+                    self.item(row).setSelected(True)
+                self.key_press_signal.emit("DoubleClick")
+                return
             self.toggle_divider_collapse(data.uuid)
             return
         self.key_press_signal.emit("DoubleClick")
@@ -4503,24 +4631,7 @@ class ModsPanel(QWidget):
             self,
         )
         self.collections_panel = ModCollectionsPanel(controller, self)
-        self.active_panel.removeWidget(self.active_mods_list)
-        self.collections_stack = QStackedWidget()
-        self.collections_stack.addWidget(self.active_mods_list)
-        self.collections_stack.addWidget(self.collections_panel)
-        self.active_panel.insertWidget(2, self.collections_panel.mode)
-        self.active_panel.insertWidget(3, self.collections_stack)
-        self.button_panel.addWidget(self.collections_panel.organize_button)
-        self.collections_panel.mode.currentIndexChanged.connect(
-            self.on_collections_mode_changed
-        )
-
-    def on_collections_mode_changed(self, index: int) -> None:
-        self.collections_stack.setCurrentIndex(index)
-        for i in range(self.active_mods_search_layout.count()):
-            layout_item = self.active_mods_search_layout.itemAt(i)
-            widget = layout_item.widget() if layout_item else None
-            if widget:
-                widget.setVisible(index == 0)
+        self.collections_panel.hide()
 
     def initialize_active_mods_search_widgets(self) -> None:
         """Initialize widgets for active mods search layout."""

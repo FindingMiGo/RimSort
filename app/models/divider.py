@@ -17,10 +17,19 @@ class DividerData:
 
     is_divider = True
 
-    def __init__(self, uuid: str, name: str, collapsed: bool = False) -> None:
+    def __init__(
+        self,
+        uuid: str,
+        name: str,
+        collapsed: bool = False,
+        collection_set_key: str = "",
+        collection_member_count: int = 0,
+    ) -> None:
         self.uuid = uuid
         self.name = name
         self.collapsed = collapsed
+        self.collection_set_key = collection_set_key
+        self.collection_member_count = collection_member_count
 
     @property
     def path(self) -> str:
