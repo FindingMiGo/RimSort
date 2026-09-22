@@ -95,7 +95,7 @@ def test_cached_tags_used_when_scrolling(
         assert row_widget.mod_tags_label.isHidden() == (not tags or not mod_tags)
 
 
-def test_visible_rows_are_loaded_one_per_event_loop_turn(qtbot: Any) -> None:
+def test_visible_rows_are_loaded_in_bounded_event_loop_batches(qtbot: Any) -> None:
     widget = make_scroll_list(qtbot, 80, True)
     bar = widget.verticalScrollBar()
 
@@ -104,16 +104,23 @@ def test_visible_rows_are_loaded_one_per_event_loop_turn(qtbot: Any) -> None:
         "create_widget_for_item",
         wraps=widget.create_widget_for_item,
     ) as create:
+        for row in range(60, 80):
+            widget.item(row).setSizeHint(QSize())
         bar.setValue(bar.maximum())
 
         # The scroll handler only schedules work, so it cannot monopolize the
         # input event that moved the scrollbar.
         create.assert_not_called()
         assert len(widget._visible_widget_queue) > 1
+        assert widget._visible_widget_queue[0].text().startswith("Mod ")
+        first_item = widget._visible_widget_queue[0]
+        reserved_size = first_item.sizeHint()
+        assert reserved_size.isValid()
 
         widget._visible_widget_timer.stop()
         widget._load_next_visible_widget()
-        assert create.call_count == 1
+        assert create.call_count == widget._LAZY_WIDGET_BATCH_SIZE
+        assert first_item.sizeHint() == reserved_size
         assert widget._visible_widget_timer.isActive()
 
 

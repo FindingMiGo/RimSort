@@ -1141,6 +1141,8 @@ class ModListIcons:
 
 
 class ModListWidget(QListWidget):
+    _LAZY_WIDGET_BATCH_SIZE = 3
+
     """
     Subclass for QListWidget. Used to store lists for
     active and inactive mods. Mods can be rearranged within
@@ -1243,6 +1245,10 @@ class ModListWidget(QListWidget):
         self._visible_widget_timer = QTimer(self)
         self._visible_widget_timer.setSingleShot(True)
         self._visible_widget_timer.timeout.connect(self._load_next_visible_widget)
+        # Reserve the final row height before lazy widgets are attached.  A
+        # changing size hint makes Qt relayout the list under the scrollbar,
+        # which looks like rows are changing order during a fast scroll.
+        self._lazy_mod_row_size = QSize(0, max(20, self.fontMetrics().height()))
 
         # This set is used to keep track of mods that have been loaded
         # into widgets. Used for an optimization strategy for `handle_rows_inserted`
@@ -2975,7 +2981,8 @@ class ModListWidget(QListWidget):
             )
             widget.toggle_warning_signal.connect(self.toggle_warning)
             widget.toggle_error_signal.connect(self.toggle_warning)
-            item.setSizeHint(widget.sizeHint())
+            if not item.sizeHint().isValid():
+                item.setSizeHint(widget.sizeHint())
             self.setItemWidget(item, widget)
 
             # Apply translation status if enabled
@@ -3003,6 +3010,9 @@ class ModListWidget(QListWidget):
         for idx in sorted(self.get_visible_indexes()):
             item = self.item(idx)
             if isinstance(item, CustomListWidgetItem) and self.itemWidget(item) is None:
+                if not item.sizeHint().isValid():
+                    item.setSizeHint(self._lazy_mod_row_size)
+                self._set_lazy_item_placeholder(item)
                 queued_items.append(item)
 
         self._visible_widget_queue = queued_items
@@ -3010,8 +3020,9 @@ class ModListWidget(QListWidget):
             self._visible_widget_timer.start(0)
 
     def _load_next_visible_widget(self) -> None:
-        """Create one queued row and yield back to Qt before continuing."""
-        while self._visible_widget_queue:
+        """Create a small row batch and yield back to Qt before continuing."""
+        loaded = 0
+        while self._visible_widget_queue and loaded < self._LAZY_WIDGET_BATCH_SIZE:
             item = self._visible_widget_queue.popleft()
             if (
                 self.row(item) >= 0
@@ -3019,10 +3030,28 @@ class ModListWidget(QListWidget):
                 and self.check_item_visible(item)
             ):
                 self.create_widget_for_item(item)
-                break
+                loaded += 1
 
         if self._visible_widget_queue:
             self._visible_widget_timer.start(0)
+
+    def _set_lazy_item_placeholder(self, item: CustomListWidgetItem) -> None:
+        """Give an unloaded row stable, useful content before its widget exists."""
+        if item.text():
+            return
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if data is None or getattr(data, "is_divider", False):
+            return
+        path = data["path"]
+        mod = self.metadata_controller.get_mod(path)
+        name = mod.name if mod is not None and isinstance(mod.name, str) else path
+        collection = data.__dict__.get("collection_name", "")
+        if collection:
+            name = f"{name} [{collection}]"
+        if data.__dict__.get("show_tags", self.show_tags) and data["mod_tags"]:
+            tags = " ".join(f"[{tag}]" for tag in data["mod_tags"])
+            name = f"{name}  {tags}"
+        item.setText(name)
 
     def get_visible_indexes(self) -> set[int]:
         """This function returns the set of indexes for items that are currently visible in the viewport."""

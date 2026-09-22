@@ -97,9 +97,13 @@ sys.excepthook = handle_exception
 if "--dev" in sys.argv:
     os.environ["RIMSORT_DEV"] = "1"
 
+# This private build follows upstream through Git rather than the release updater.
+# Set the flag before constructing any UI so startup checks and the Update menu
+# stay disabled even when an existing settings file has checks enabled.
+os.environ["RIMSORT_DISABLE_UPDATER"] = "1"
+
 # Process --disable-updater flag if present (before any other initialization)
 if "--disable-updater" in sys.argv:
-    os.environ["RIMSORT_DISABLE_UPDATER"] = "1"
     # Remove all instances of the flag
     while "--disable-updater" in sys.argv:
         sys.argv.remove("--disable-updater")
