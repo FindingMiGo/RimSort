@@ -2983,6 +2983,10 @@ class ModListWidget(QListWidget):
             widget.toggle_error_signal.connect(self.toggle_warning)
             if not item.sizeHint().isValid():
                 item.setSizeHint(widget.sizeHint())
+            # The item text is only a lightweight placeholder while the real
+            # row widget is loading.  Leaving it set makes QListWidget's
+            # delegate paint the same title underneath the widget.
+            item.setText("")
             self.setItemWidget(item, widget)
 
             # Apply translation status if enabled

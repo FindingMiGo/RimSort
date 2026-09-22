@@ -121,6 +121,7 @@ def test_visible_rows_are_loaded_in_bounded_event_loop_batches(qtbot: Any) -> No
         widget._load_next_visible_widget()
         assert create.call_count == widget._LAZY_WIDGET_BATCH_SIZE
         assert first_item.sizeHint() == reserved_size
+        assert first_item.text() == ""
         assert widget._visible_widget_timer.isActive()
 
 
