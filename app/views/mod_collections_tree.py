@@ -56,7 +56,6 @@ class ModCollectionsTree(QTreeWidget):
         current = self.currentItem()
         current_id = self.identity(current) if current else None
         scroll = self.verticalScrollBar().value(), self.horizontalScrollBar().value()
-        first_build = self.topLevelItemCount() == 0
         self.snapshot = snapshot
         with QSignalBlocker(self):
             self.clear()
@@ -91,7 +90,7 @@ class ModCollectionsTree(QTreeWidget):
                 self._add_mods(node, ungrouped, mod_name)
             for node in self.nodes():
                 identity = self.identity(node)
-                expanded, selected = state.get(identity, (first_build, False))
+                expanded, selected = state.get(identity, (False, False))
                 node.setExpanded(expanded)
                 if identity == current_id:
                     self.setCurrentItem(

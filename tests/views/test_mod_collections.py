@@ -104,6 +104,13 @@ def test_drop_mod_onto_mod_creates_and_extends_set(
     assert controller.collections.sets[key].name == controller.mod_name(paths[1])
     assert controller.collections.sets[key].members == [paths[1], paths[0]]
     assert source.paths == original_order
+    view = collections_panel.collections_panel
+    assert view.mode.currentIndex() == 1
+    set_node = next(
+        node for node in view.tree.nodes() if view.tree.identity(node) == ("set", key)
+    )
+    assert set_node.childCount() == 2
+    assert not set_node.isExpanded()
 
     source.clearSelection()
     source.item(2).setSelected(True)

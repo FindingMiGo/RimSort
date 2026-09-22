@@ -28,6 +28,7 @@ class ModCollectionsPanel(QWidget):
         self.controller = controller
         self._tree_dirty = True
         controller.changed.connect(self._on_collections_changed)
+        controller.set_created_from_drop.connect(self.show_dropped_set)
         self.mode = QComboBox()
         self.mode.addItems(
             [
@@ -90,6 +91,19 @@ class ModCollectionsPanel(QWidget):
 
     def apply_filters(self, *_args: object) -> None:
         self.tree.apply_filters(self.search.text(), self.active_only.isChecked())
+
+    def show_dropped_set(self, key: str) -> None:
+        """Reveal a drop-created set as a collapsed parent in the tree."""
+        self.mode.setCurrentIndex(1)
+        self._tree_dirty = True
+        self.refresh()
+        for node in self.tree.nodes():
+            if self.tree.identity(node) == ("set", key):
+                self.tree.setCurrentItem(node)
+                node.setSelected(True)
+                node.setExpanded(False)
+                self.tree.scrollToItem(node)
+                break
 
     def selected_paths(self) -> list[str]:
         paths = []

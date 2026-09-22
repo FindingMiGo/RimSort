@@ -17,6 +17,7 @@ if typing.TYPE_CHECKING:
 
 class ModCollectionsController(QObject):
     changed = Signal()
+    set_created_from_drop = Signal(str)
 
     def __init__(
         self,
@@ -117,13 +118,15 @@ class ModCollectionsController(QObject):
         key = self.collections.set_for(target_path)
         if key:
             self.assign(paths, "set", key)
+            self.set_created_from_drop.emit(key)
             return
-        self.create(
+        key = self.create(
             "set",
             self.mod_name(target_path),
             [target_path, *paths],
             [],
         )
+        self.set_created_from_drop.emit(key)
 
     def detach(self, paths: list[str]) -> None:
         self.collections.detach(paths)
