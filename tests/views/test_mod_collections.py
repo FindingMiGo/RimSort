@@ -21,7 +21,7 @@ from app.utils.custom_list_widget_item import CustomListWidgetItem
 from app.utils.custom_list_widget_item_metadata import CustomListWidgetItemMetadata
 from app.utils.event_bus import EventBus
 from app.views.mod_collections_panel import ModCollectionsPanel
-from app.views.mods_panel import ModsPanel
+from app.views.mods_panel import ModListItemInner, ModsPanel
 
 
 @pytest.fixture
@@ -123,6 +123,12 @@ def test_drop_mod_onto_mod_creates_and_extends_set(
     assert not source.item(1).isHidden()
     assert source.item(1).text().startswith("Mod ")
     QApplication.processEvents()
+    parent_widget = source.itemWidget(source.item(0))
+    assert isinstance(parent_widget, ModListItemInner)
+    assert parent_widget.list_item_name == controller.mod_name(paths[1])
+    child_widget = source.itemWidget(source.item(1))
+    assert isinstance(child_widget, ModListItemInner)
+    assert child_widget.list_item_name == controller.mod_name(paths[0])
     assert source.itemWidget(source.item(1)) is not None
     assert source.item(1).text() == ""
 
@@ -260,12 +266,12 @@ def test_reordering_and_instance_switch_preserve_separate_groups(
     QApplication.processEvents()
     assert controller.collections.sets == {}
     data = controller.items(active)[paths[0]].data(Qt.ItemDataRole.UserRole)
-    assert data.__dict__["collection_name"] == ""
+    assert data.__dict__.get("collection_name", "") == ""
     controller.settings.current_instance = previous
     EventBus().settings_have_changed.emit()
     QApplication.processEvents()
     assert controller.collections.sets[key].members == paths[:2]
-    assert data.__dict__["collection_name"] == "Translations"
+    assert data.__dict__.get("collection_name", "") == ""
 
 
 def test_empty_set_can_move_between_folders(collections_panel: ModsPanel) -> None:

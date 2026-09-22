@@ -81,7 +81,14 @@ class ModCollectionsController(QObject):
 
     def refresh(self) -> None:
         self.timer.stop()
-        labels = self.collections.labels()
+        set_members = {
+            path for group in self.collections.sets.values() for path in group.members
+        }
+        labels = {
+            path: label
+            for path, label in self.collections.labels().items()
+            if path not in set_members
+        }
         paths = []
         for source in (self.active_list, self.inactive_list):
             items = self.items(source)
