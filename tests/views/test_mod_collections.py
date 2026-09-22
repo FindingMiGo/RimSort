@@ -117,6 +117,17 @@ def test_drop_requires_a_different_selected_mod(collections_panel: ModsPanel) ->
     assert not source._request_set_from_drop(source.item(0))
 
 
+def test_drop_center_targets_mod_but_row_edges_reorder(
+    collections_panel: ModsPanel,
+) -> None:
+    source = collections_panel.inactive_mods_list
+    item = source.item(1)
+    rect = source.visualItemRect(item)
+    assert source._drop_position_is_on_item(item, rect.center())
+    assert not source._drop_position_is_on_item(item, rect.topLeft())
+    assert not source._drop_position_is_on_item(item, rect.bottomLeft())
+
+
 def test_batch_activation_preserves_order_and_tree_membership(
     collections_panel: ModsPanel,
 ) -> None:

@@ -1354,9 +1354,9 @@ class ModListWidget(QListWidget):
         target_item = self.itemAt(event.position().toPoint())
         if (
             source_widget == self
-            and self.dropIndicatorPosition()
-            == QAbstractItemView.DropIndicatorPosition.OnItem
             and isinstance(target_item, CustomListWidgetItem)
+            and not target_item.isSelected()
+            and self._drop_position_is_on_item(target_item, event.position().toPoint())
             and self._request_set_from_drop(target_item)
         ):
             event.acceptProposedAction()
@@ -1387,6 +1387,20 @@ class ModListWidget(QListWidget):
         # from handle_rows_inserted once the queued insertion completes.
         if source_widget == self:
             self.list_update_signal.emit("drop")
+
+    def _drop_position_is_on_item(
+        self, item: CustomListWidgetItem, position: Any
+    ) -> bool:
+        """Treat the middle half of a row as dropping onto that mod.
+
+        QListWidget normally reports internal drops as above/below an item,
+        even when the pointer is visually over it.  Use the actual row
+        geometry so the center means grouping and the edges still mean
+        reordering.
+        """
+        rect = self.visualItemRect(item)
+        edge = max(2, rect.height() // 4)
+        return rect.adjusted(0, edge, 0, -edge).contains(position)
 
     def _request_set_from_drop(self, target_item: CustomListWidgetItem | None) -> bool:
         """Create or extend a set when selected mods are dropped onto a mod."""
