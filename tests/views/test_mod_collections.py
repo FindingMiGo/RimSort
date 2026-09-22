@@ -104,28 +104,32 @@ def test_drop_mod_onto_mod_creates_and_extends_set(
     assert controller.collections.sets[key].name == controller.mod_name(paths[1])
     assert controller.collections.sets[key].members == [paths[1], paths[0]]
     assert original_order == paths
-    header = source.item(0)
-    header_data = header.data(Qt.ItemDataRole.UserRole)
-    assert header_data.collection_set_key == key
-    assert header_data.collapsed
+    parent = source.item(0)
+    parent_data = parent.data(Qt.ItemDataRole.UserRole)
+    assert parent_data["path"] == paths[1]
+    assert parent_data.__dict__["collection_set_key"] == key
+    assert parent_data.__dict__["collection_parent"]
+    assert parent_data.__dict__["collection_collapsed"]
     assert source.item(1).isHidden()
-    assert source.item(2).isHidden()
-    assert [
-        path for path in source.paths if not path.startswith("__divider__")
-    ] == paths
-
-    source.toggle_divider_collapse(header_data.uuid)
-    assert not source.item(1).isHidden()
     assert not source.item(2).isHidden()
+    assert [path for path in source.paths if not path.startswith("__divider__")] == [
+        paths[1],
+        paths[0],
+        paths[2],
+        paths[3],
+    ]
+
+    source.toggle_collection_set(key)
+    assert not source.item(1).isHidden()
     assert source.item(1).text().startswith("Mod ")
     QApplication.processEvents()
     assert source.itemWidget(source.item(1)) is not None
     assert source.item(1).text() == ""
 
     source.clearSelection()
-    header.setSelected(True)
+    parent.setSelected(True)
     move = QSignalSpy(source.key_press_signal)
-    source.mod_double_clicked(header)
+    source.mod_double_clicked(parent)
     assert move.count() == 1
     assert move.at(0) == ["DoubleClick"]
     assert {
@@ -247,7 +251,7 @@ def test_reordering_and_instance_switch_preserve_separate_groups(
     node = first_group(view)
     member = node.child(0)
     assert member is not None
-    assert member.text(2) == "#1"
+    assert member.text(2) == "#4"
     assert controller.collections.sets[key].members == paths[:2]
     previous = controller.settings.current_instance
     controller.settings.instances["another"] = Instance()
