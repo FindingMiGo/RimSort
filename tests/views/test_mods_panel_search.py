@@ -104,3 +104,32 @@ def test_author_search_filters_mods_without_authors(
     panel.signal_search_and_filters("Active", "author")
 
     assert item.isHidden()
+
+
+def test_name_search_uses_item_path_after_list_reordering(qtbot: object) -> None:
+    settings = Settings()
+    target_path = "/mods/rim-hivers-biotech-jp"
+    other_path = "/mods/other"
+    metadata = MagicMock()
+    metadata.mods_metadata = {
+        target_path: AboutXmlMod(
+            name="Rim-Hivers! - Biotech JP",
+            package_id=CaseInsensitiveStr("astalow.jpt.vexedtrees980.rimhiversbiotech"),
+        ),
+        other_path: AboutXmlMod(
+            name="Other Mod", package_id=CaseInsensitiveStr("example.other")
+        ),
+    }
+    metadata.get_mod.side_effect = metadata.mods_metadata.get
+    panel = ModsPanel(settings, metadata)
+    qtbot.addWidget(panel)  # type: ignore[attr-defined]
+    target_item = _add_mod_item(panel, "Active", target_path)
+    other_item = _add_mod_item(panel, "Active", other_path)
+    panel.active_mods_list.paths = [other_path, target_path]
+    panel.active_mods_list.check_widgets_visible = MagicMock()  # type: ignore[method-assign]
+    panel.active_mods_search_filter.setCurrentText(panel.tr("Name"))
+
+    panel.signal_search_and_filters("Active", "Rim-Hivers! - Biotech JP")
+
+    assert not target_item.isHidden()
+    assert other_item.isHidden()

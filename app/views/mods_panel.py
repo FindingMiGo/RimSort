@@ -5717,7 +5717,7 @@ class ModsPanel(QWidget):
         """
         _filter: QComboBox
         filter_state: bool  # The 'Hide Filter' state
-        uuids: list[str]
+        mod_list: ModListWidget
         fs: FilterState
         # Notify controller when search bar text or any filters change
         if list_type == "Active":
@@ -5728,12 +5728,12 @@ class ModsPanel(QWidget):
         if list_type == "Active":
             _filter = self.active_mods_search_filter
             filter_state = self.active_mods_search_filter_state
-            uuids = self.active_mods_list.paths
+            mod_list = self.active_mods_list
             fs = self.active_filter_button.filter_panel.filter_state
         elif list_type == "Inactive":
             _filter = self.inactive_mods_search_filter
             filter_state = self.inactive_mods_search_filter_state
-            uuids = self.inactive_mods_list.paths
+            mod_list = self.inactive_mods_list
             fs = self.inactive_filter_button.filter_panel.filter_state
         else:
             raise NotImplementedError(f"Unknown list type: {list_type}")
@@ -5771,18 +5771,15 @@ class ModsPanel(QWidget):
             )
         ):
             matches = self.search_mod_notes(pattern)
-        for idx, uuid in enumerate(uuids):
-            item = (
-                self.active_mods_list.item(idx)
-                if list_type == "Active"
-                else self.inactive_mods_list.item(idx)
-            )
+        for idx in range(mod_list.count()):
+            item = mod_list.item(idx)
             if item is None:
-                continue
-            if is_divider_uuid(uuid):
                 continue
             item_data = item.data(Qt.ItemDataRole.UserRole)
             if getattr(item_data, "is_divider", False):
+                continue
+            uuid = item_data["path"]
+            if is_divider_uuid(uuid):
                 continue
             # Check if UUID exists in metadata before accessing
             if uuid not in self.metadata_controller.mods_metadata:
@@ -5925,9 +5922,6 @@ class ModsPanel(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, item_data)
 
         self.direct_update_count(list_type, num_filtered, num_unfiltered)
-        mod_list = (
-            self.active_mods_list if list_type == "Active" else self.inactive_mods_list
-        )
         mod_list.apply_collection_search(
             matching_paths, bool(filter_state and filters_active)
         )
