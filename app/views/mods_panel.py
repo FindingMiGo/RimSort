@@ -127,6 +127,8 @@ from app.views.divider_widget import DividerItemInner
 from app.views.filter_panel import FilterButton
 from app.views.mod_collections_panel import ModCollectionsPanel
 
+_COLLECTION_CHILD_ROW_HEIGHT = 24
+
 
 class ModListItemInner(QWidget):
     """
@@ -440,7 +442,7 @@ class ModListItemInner(QWidget):
             label = QLabel(f"↳ {child_text}")
             label.setObjectName("ListItemLabel")
             label.setToolTip(tooltip)
-            label.setFixedHeight(24)
+            label.setFixedHeight(_COLLECTION_CHILD_ROW_HEIGHT)
             self.collection_children_layout.addWidget(label)
         self.collection_children_widget.setHidden(not children)
 
@@ -3153,6 +3155,8 @@ class ModListWidget(QListWidget):
 
             # Ensure initial icon states reflect current item data
             widget.repolish(item)
+            if data.__dict__.get("collection_parent", False):
+                self._sync_collection_row_height(item)
 
     def check_widgets_visible(self) -> None:
         """Queue missing visible row widgets without blocking the event loop.
@@ -3564,6 +3568,10 @@ class ModListWidget(QListWidget):
 
             for item in self.get_all_mod_list_items():
                 data = item.data(Qt.ItemDataRole.UserRole)
+                if "collection_base_height" not in data.__dict__:
+                    data.__dict__["collection_base_height"] = max(
+                        self._lazy_mod_row_size.height(), item.sizeHint().height()
+                    )
                 data.__dict__["collection_child"] = False
                 data.__dict__["collection_parent"] = False
                 data.__dict__["collection_set_key"] = ""
@@ -3575,7 +3583,7 @@ class ModListWidget(QListWidget):
                 widget = self.itemWidget(item)
                 if isinstance(widget, ModListItemInner):
                     widget.clear_collection_group()
-                    item.setSizeHint(widget.sizeHint())
+                self._sync_collection_row_height(item)
 
             for key, group in collections.sets.items():
                 member_items = [
@@ -3608,7 +3616,8 @@ class ModListWidget(QListWidget):
                     widget = self.itemWidget(item)
                     if isinstance(widget, ModListItemInner) and is_parent:
                         widget.set_collection_parent(key, collapsed, children)
-                        item.setSizeHint(widget.sizeHint())
+                    if is_parent:
+                        self._sync_collection_row_height(item)
         finally:
             self.model().rowsInserted.connect(
                 self.handle_rows_inserted, Qt.ConnectionType.QueuedConnection
@@ -3636,12 +3645,12 @@ class ModListWidget(QListWidget):
                 self._expanded_collection_sets.discard(key)
             else:
                 self._expanded_collection_sets.add(key)
+            children = self._collection_child_summaries(key)
+            data.__dict__["collection_children"] = children
             widget = self.itemWidget(item)
             if isinstance(widget, ModListItemInner):
-                widget.set_collection_parent(
-                    key, collapsed, self._collection_child_summaries(key)
-                )
-                item.setSizeHint(widget.sizeHint())
+                widget.set_collection_parent(key, collapsed, children)
+            self._sync_collection_row_height(item)
             for child_row in range(self.count()):
                 child = self.item(child_row)
                 child_data = child.data(Qt.ItemDataRole.UserRole)
@@ -3694,6 +3703,27 @@ class ModListWidget(QListWidget):
             )
         return children
 
+    def _sync_collection_row_height(self, item: CustomListWidgetItem) -> None:
+        """Reserve the expanded height even before its row widget is created."""
+        data = item.data(Qt.ItemDataRole.UserRole)
+        base_height = int(
+            data.__dict__.get(
+                "collection_base_height", self._lazy_mod_row_size.height()
+            )
+        )
+        expanded = bool(
+            data.__dict__.get("collection_parent", False)
+            and (
+                not data.__dict__.get("collection_collapsed", True)
+                or data.__dict__.get("collection_search_paths", [])
+            )
+        )
+        children = data.__dict__.get("collection_children", []) if expanded else []
+        width = max(0, item.sizeHint().width())
+        item.setSizeHint(
+            QSize(width, base_height + len(children) * _COLLECTION_CHILD_ROW_HEIGHT)
+        )
+
     def apply_collection_search(self, matching_paths: set[str], active: bool) -> None:
         """Expose matching set children through their representative row."""
         groups: dict[str, list[CustomListWidgetItem]] = {}
@@ -3731,13 +3761,14 @@ class ModListWidget(QListWidget):
                 parent_data.__dict__["hidden_by_filter"] = False
                 parent.setHidden(False)
             children = self._collection_child_summaries(key)
+            parent_data.__dict__["collection_children"] = children
             widget = self.itemWidget(parent)
             if isinstance(widget, ModListItemInner):
                 collapsed = bool(parent_data.__dict__.get("collection_collapsed", True))
                 widget.set_collection_parent(
                     key, collapsed and not visible_child_matches, children
                 )
-                parent.setSizeHint(widget.sizeHint())
+            self._sync_collection_row_height(parent)
 
     def refresh_collection_summaries(self) -> None:
         """Refresh expanded child labels after load-order warnings change."""
@@ -3758,7 +3789,7 @@ class ModListWidget(QListWidget):
                     and not bool(data.__dict__.get("collection_search_paths", [])),
                     children,
                 )
-                item.setSizeHint(widget.sizeHint())
+            self._sync_collection_row_height(item)
 
     def restore_dividers(self, dividers: list[dict[str, Any]]) -> None:
         """Re-insert dividers at saved positions after a list rebuild."""

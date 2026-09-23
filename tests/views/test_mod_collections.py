@@ -120,9 +120,11 @@ def test_drop_mod_onto_mod_creates_and_extends_set(
         paths[3],
     ]
 
+    collapsed_height = source.visualItemRect(parent).height()
     source.toggle_collection_set(key)
     assert source.item(0).isHidden()
     QApplication.processEvents()
+    assert source.visualItemRect(parent).height() >= collapsed_height + 24
     parent_widget = source.itemWidget(source.item(1))
     assert isinstance(parent_widget, ModListItemInner)
     assert parent_widget.list_item_name == controller.mod_name(paths[1])
@@ -144,6 +146,10 @@ def test_drop_mod_onto_mod_creates_and_extends_set(
     assert refreshed_label.text() == f"↳ #1 ⚠ {controller.mod_name(paths[0])}"
     assert refreshed_label.toolTip() == "Load-order warning"
 
+    source.toggle_collection_set(key)
+    QApplication.processEvents()
+    assert source.visualItemRect(parent).height() == collapsed_height
+
     source.clearSelection()
     parent.setSelected(True)
     source.set_collection_enabled_signal.disconnect()
@@ -163,6 +169,30 @@ def test_drop_requires_a_different_selected_mod(collections_panel: ModsPanel) ->
     source = collections_panel.inactive_mods_list
     source.item(0).setSelected(True)
     assert not source._request_set_from_drop(source.item(0))
+
+
+def test_expanding_unloaded_set_reserves_child_rows(
+    collections_panel: ModsPanel,
+) -> None:
+    controller = collections_panel.collections_panel.controller
+    source = controller.inactive_list
+    paths = list(controller.items(source))
+    key = controller.create("set", "Translations", paths[:3], [])
+    parent = controller.items(source)[paths[0]]
+    source._visible_widget_timer.stop()
+    source._visible_widget_queue.clear()
+    source.removeItemWidget(parent)
+    assert source.itemWidget(parent) is None
+    collapsed_height = parent.sizeHint().height()
+
+    source.toggle_collection_set(key)
+    assert parent.sizeHint().height() == collapsed_height + 48
+
+    source.create_widget_for_item(parent)
+    widget = source.itemWidget(parent)
+    assert isinstance(widget, ModListItemInner)
+    assert widget.collection_children_layout.count() == 2
+    assert parent.sizeHint().height() == collapsed_height + 48
 
 
 def test_deleting_set_clears_parent_toggle_and_child_indent(
