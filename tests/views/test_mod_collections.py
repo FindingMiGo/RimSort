@@ -1,6 +1,7 @@
 """Grouping uses the real mod-list signals without changing load order."""
 
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -25,7 +26,31 @@ from app.utils.custom_list_widget_item import CustomListWidgetItem
 from app.utils.custom_list_widget_item_metadata import CustomListWidgetItemMetadata
 from app.utils.event_bus import EventBus
 from app.views.mod_collections_panel import ModCollectionsPanel
-from app.views.mods_panel import ModListItemInner, ModsPanel
+from app.views.mods_panel import ModListItemInner, ModListWidget, ModsPanel
+
+
+def synthetic_item(path: str, list_type: str) -> CustomListWidgetItem:
+    data = object.__new__(CustomListWidgetItemMetadata)
+    data.__dict__.update(
+        path=path,
+        errors_warnings="",
+        errors="",
+        warnings="",
+        warning_toggled=False,
+        filtered=False,
+        hidden_by_filter=False,
+        invalid=False,
+        mismatch=False,
+        alternative=False,
+        mod_color=None,
+        mod_tags=[],
+        show_tags=False,
+        list_type=list_type,
+    )
+    item = CustomListWidgetItem()
+    item.setData(Qt.ItemDataRole.UserRole, data, avoid_emit=True)
+    item.setData(Qt.ItemDataRole.SizeHintRole, QSize(600, 24), avoid_emit=True)
+    return item
 
 
 @pytest.fixture
@@ -53,27 +78,7 @@ def collections_panel(qtbot: QtBot, fresh_event_bus: None) -> Iterator[ModsPanel
     # Bypass the database-backed metadata constructor, keeping real Qt lists,
     # widgets, list-update signals and warning/count recalculation connected.
     for path in metadata.mods_metadata:
-        data = object.__new__(CustomListWidgetItemMetadata)
-        data.__dict__.update(
-            path=path,
-            errors_warnings="",
-            errors="",
-            warnings="",
-            warning_toggled=False,
-            filtered=False,
-            hidden_by_filter=False,
-            invalid=False,
-            mismatch=False,
-            alternative=False,
-            mod_color=None,
-            mod_tags=[],
-            show_tags=False,
-            list_type="Inactive",
-        )
-        item = CustomListWidgetItem()
-        item.setData(Qt.ItemDataRole.UserRole, data, avoid_emit=True)
-        item.setData(Qt.ItemDataRole.SizeHintRole, QSize(600, 24), avoid_emit=True)
-        panel.inactive_mods_list.addItem(item)
+        panel.inactive_mods_list.addItem(synthetic_item(path, "Inactive"))
     QApplication.processEvents()
     yield panel
     panel._sort_debounce_timer.stop()
@@ -94,30 +99,65 @@ def append_synthetic_mod(
 ) -> None:
     """Simulate the list insertion following a filesystem creation event."""
     source = panel.active_mods_list if active else panel.inactive_mods_list
-    data = object.__new__(CustomListWidgetItemMetadata)
-    data.__dict__.update(
-        path=path,
-        errors_warnings="",
-        errors="",
-        warnings="",
-        warning_toggled=False,
-        filtered=False,
-        hidden_by_filter=False,
-        invalid=False,
-        mismatch=False,
-        alternative=False,
-        mod_color=None,
-        mod_tags=[],
-        show_tags=False,
-        list_type=source.list_type,
-    )
-    item = CustomListWidgetItem()
-    item.setData(Qt.ItemDataRole.UserRole, data, avoid_emit=True)
-    item.setData(Qt.ItemDataRole.SizeHintRole, QSize(600, 24), avoid_emit=True)
+    item = synthetic_item(path, source.list_type)
     if index is None:
         source.addItem(item)
     else:
         source.insertItem(index, item)
+
+
+def activate_three(
+    panel: ModsPanel,
+) -> tuple[ModCollectionsController, list[str], ModListWidget]:
+    controller = panel.collections_panel.controller
+    paths = list(controller.items(controller.inactive_list))[:3]
+    controller.set_enabled(paths, True)
+    QApplication.processEvents()
+    return controller, paths, panel.active_mods_list
+
+
+def child_labels(
+    source: ModListWidget, parent: CustomListWidgetItem
+) -> tuple[ModListItemInner, list[QLabel]]:
+    widget = source.itemWidget(parent)
+    assert isinstance(widget, ModListItemInner)
+    labels = []
+    for index in range(widget.collection_children_layout.count()):
+        layout_item = widget.collection_children_layout.itemAt(index)
+        assert layout_item is not None
+        label = layout_item.widget()
+        assert isinstance(label, QLabel)
+        labels.append(label)
+    return widget, labels
+
+
+@contextmanager
+def mock_mod_creation(panel: ModsPanel) -> Iterator[tuple[MagicMock, MagicMock]]:
+    with (
+        patch.object(
+            panel.active_mods_list,
+            "append_new_item",
+            side_effect=lambda path, index=None: append_synthetic_mod(
+                panel, path, True, index
+            ),
+        ) as append_active,
+        patch.object(
+            panel.inactive_mods_list,
+            "append_new_item",
+            side_effect=lambda path: append_synthetic_mod(panel, path, False),
+        ) as append_inactive,
+    ):
+        yield append_active, append_inactive
+
+
+def missing_active_child(
+    panel: ModsPanel,
+) -> tuple[ModCollectionsController, list[str], str]:
+    controller, paths, _ = activate_three(panel)
+    key = controller.create("set", "Paired", paths, [])
+    panel.on_mod_deleted(paths[1])
+    QApplication.processEvents()
+    return controller, paths, key
 
 
 def test_renamed_translation_folder_rebinds_saved_set_member() -> None:
@@ -255,13 +295,9 @@ def test_adding_to_expanded_set_keeps_all_child_rows_visible(
     QApplication.processEvents()
 
     parent = view.controller.items(source)[paths[0]]
-    widget = source.itemWidget(parent)
-    assert isinstance(widget, ModListItemInner)
-    assert widget.collection_children_layout.count() == 2
-    last_layout_item = widget.collection_children_layout.itemAt(1)
-    assert last_layout_item is not None
-    last_label = last_layout_item.widget()
-    assert isinstance(last_label, QLabel)
+    widget, labels = child_labels(source, parent)
+    assert len(labels) == 2
+    last_label = labels[-1]
     assert (
         last_label.mapTo(widget, last_label.rect().bottomLeft()).y() < widget.height()
     )
@@ -286,13 +322,9 @@ def test_adding_inactive_mod_to_active_set_shows_second_child(
     assert paths[2] not in controller.items(controller.inactive_list)
     assert active.paths == active.get_all_mod_paths()
     parent = controller.items(active)[paths[0]]
-    widget = active.itemWidget(parent)
-    assert isinstance(widget, ModListItemInner)
-    assert widget.collection_children_layout.count() == 2
-    last_layout_item = widget.collection_children_layout.itemAt(1)
-    assert last_layout_item is not None
-    last_label = last_layout_item.widget()
-    assert isinstance(last_label, QLabel)
+    widget, labels = child_labels(active, parent)
+    assert len(labels) == 2
+    last_label = labels[-1]
     assert controller.mod_name(paths[2]) in last_label.text()
     assert (
         last_label.mapTo(widget, last_label.rect().bottomLeft()).y() < widget.height()
@@ -319,11 +351,7 @@ def test_second_active_drop_keeps_first_set_child_visible(
 ) -> None:
     panel = collections_panel
     panel.show()
-    controller = panel.collections_panel.controller
-    paths = list(controller.items(controller.inactive_list))
-    controller.set_enabled(paths[:3], True)
-    QApplication.processEvents()
-    active = controller.active_list
+    controller, paths, active = activate_three(panel)
     items = controller.items(active)
     items[paths[1]].setSelected(True)
     assert active._request_set_from_drop(items[paths[0]])
@@ -338,16 +366,10 @@ def test_second_active_drop_keeps_first_set_child_visible(
 
     assert controller.collections.sets[key].members == paths[:3]
     parent = controller.items(active)[paths[0]]
-    widget = active.itemWidget(parent)
-    assert isinstance(widget, ModListItemInner)
-    assert widget.collection_children_layout.count() == 2
-    first = widget.collection_children_layout.itemAt(0)
-    second = widget.collection_children_layout.itemAt(1)
-    assert first is not None and second is not None
-    first_label, second_label = first.widget(), second.widget()
-    assert isinstance(first_label, QLabel) and isinstance(second_label, QLabel)
-    assert controller.mod_name(paths[1]) in first_label.text()
-    assert controller.mod_name(paths[2]) in second_label.text()
+    _, labels = child_labels(active, parent)
+    assert len(labels) == 2
+    assert controller.mod_name(paths[1]) in labels[0].text()
+    assert controller.mod_name(paths[2]) in labels[1].text()
 
 
 def test_second_active_drop_keeps_previously_selected_child_first(
@@ -355,11 +377,7 @@ def test_second_active_drop_keeps_previously_selected_child_first(
 ) -> None:
     panel = collections_panel
     panel.show()
-    controller = panel.collections_panel.controller
-    paths = list(controller.items(controller.inactive_list))
-    controller.set_enabled(paths[:3], True)
-    QApplication.processEvents()
-    active = controller.active_list
+    controller, paths, active = activate_three(panel)
     items = controller.items(active)
     items[paths[2]].setSelected(True)
     assert active._request_set_from_drop(items[paths[0]])
@@ -380,31 +398,18 @@ def test_second_active_drop_keeps_previously_selected_child_first(
         paths[1],
     ]
     parent = controller.items(active)[paths[0]]
-    widget = active.itemWidget(parent)
-    assert isinstance(widget, ModListItemInner)
-    assert widget.collection_children_layout.count() == 2
-    first = widget.collection_children_layout.itemAt(0)
-    second = widget.collection_children_layout.itemAt(1)
-    assert first is not None and second is not None
-    first_label, second_label = first.widget(), second.widget()
-    assert isinstance(first_label, QLabel) and isinstance(second_label, QLabel)
-    assert controller.mod_name(paths[2]) in first_label.text()
-    assert controller.mod_name(paths[1]) in second_label.text()
-    assert (
-        second_label.mapTo(widget, second_label.rect().bottomLeft()).y()
-        < widget.height()
-    )
+    widget, labels = child_labels(active, parent)
+    assert len(labels) == 2
+    assert controller.mod_name(paths[2]) in labels[0].text()
+    assert controller.mod_name(paths[1]) in labels[1].text()
+    assert labels[1].mapTo(widget, labels[1].rect().bottomLeft()).y() < widget.height()
 
 
 def test_active_set_survives_representative_deletion_and_recreation(
     collections_panel: ModsPanel,
 ) -> None:
     panel = collections_panel
-    controller = panel.collections_panel.controller
-    paths = list(controller.items(controller.inactive_list))[:3]
-    controller.set_enabled(paths, True)
-    QApplication.processEvents()
-    active = panel.active_mods_list
+    controller, paths, active = activate_three(panel)
     items = controller.items(active)
     items[paths[1]].setSelected(True)
     items[paths[2]].setSelected(True)
@@ -418,16 +423,7 @@ def test_active_set_survives_representative_deletion_and_recreation(
     assert fallback.data(Qt.ItemDataRole.UserRole).__dict__["collection_parent"]
     assert controller.items(active)[paths[2]].isHidden()
 
-    with (
-        patch.object(
-            active,
-            "append_new_item",
-            side_effect=lambda path, index: append_synthetic_mod(
-                panel, path, True, index
-            ),
-        ) as append_active,
-        patch.object(panel.inactive_mods_list, "append_new_item") as append_inactive,
-    ):
+    with mock_mod_creation(panel) as (append_active, append_inactive):
         panel.on_mod_created(paths[0])
         append_active.assert_called_once_with(paths[0], 0)
         append_inactive.assert_not_called()
@@ -441,28 +437,9 @@ def test_recreated_active_child_rejoins_set_and_new_mod_stays_inactive(
     collections_panel: ModsPanel,
 ) -> None:
     panel = collections_panel
-    controller = panel.collections_panel.controller
-    paths = list(controller.items(controller.inactive_list))[:3]
-    controller.set_enabled(paths, True)
-    QApplication.processEvents()
-    key = controller.create("set", "Paired", paths, [])
-    panel.on_mod_deleted(paths[1])
-    QApplication.processEvents()
+    controller, paths, key = missing_active_child(panel)
 
-    with (
-        patch.object(
-            panel.active_mods_list,
-            "append_new_item",
-            side_effect=lambda path, index: append_synthetic_mod(
-                panel, path, True, index
-            ),
-        ) as append_active,
-        patch.object(
-            panel.inactive_mods_list,
-            "append_new_item",
-            side_effect=lambda path: append_synthetic_mod(panel, path, False),
-        ) as append_inactive,
-    ):
+    with mock_mod_creation(panel) as (append_active, append_inactive):
         panel.on_mod_created(paths[1])
         panel.on_mod_created("/synthetic/new")
         panel.on_mod_created(paths[1])
@@ -479,24 +456,11 @@ def test_recreated_child_follows_set_disabled_while_it_was_missing(
     collections_panel: ModsPanel,
 ) -> None:
     panel = collections_panel
-    controller = panel.collections_panel.controller
-    paths = list(controller.items(controller.inactive_list))[:3]
-    controller.set_enabled(paths, True)
-    QApplication.processEvents()
-    key = controller.create("set", "Paired", paths, [])
-    panel.on_mod_deleted(paths[1])
-    QApplication.processEvents()
+    controller, paths, key = missing_active_child(panel)
     controller.set_enabled(controller.collections.members("set", key), False)
     QApplication.processEvents()
 
-    with (
-        patch.object(panel.active_mods_list, "append_new_item") as append_active,
-        patch.object(
-            panel.inactive_mods_list,
-            "append_new_item",
-            side_effect=lambda path: append_synthetic_mod(panel, path, False),
-        ) as append_inactive,
-    ):
+    with mock_mod_creation(panel) as (append_active, append_inactive):
         panel.on_mod_created(paths[1])
         append_active.assert_not_called()
         append_inactive.assert_called_once_with(paths[1])
