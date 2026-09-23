@@ -3466,8 +3466,6 @@ class ModListWidget(QListWidget):
     def apply_collapse_states(self) -> None:
         """Hide/show items according to their preceding divider's collapsed state."""
         collapsed = False
-        collection_remaining = 0
-        collection_collapsed = False
         for i in range(self.count()):
             item = self.item(i)
             data = item.data(Qt.ItemDataRole.UserRole)
@@ -3478,18 +3476,11 @@ class ModListWidget(QListWidget):
                     widget.set_collapsed(data.collapsed)
             else:
                 hidden_by_filter = getattr(data, "hidden_by_filter", False)
-                item.setHidden(collapsed or collection_collapsed or hidden_by_filter)
-                if data.__dict__.get("collection_parent", False):
-                    collection_remaining = int(
-                        data.__dict__.get("collection_member_count", 0)
-                    )
-                    collection_collapsed = bool(
-                        data.__dict__.get("collection_collapsed", True)
-                    )
-                elif collection_remaining:
-                    collection_remaining -= 1
-                    if not collection_remaining:
-                        collection_collapsed = False
+                collection_hidden = bool(
+                    data.__dict__.get("collection_child", False)
+                    and data.__dict__.get("collection_collapsed", True)
+                )
+                item.setHidden(collapsed or collection_hidden or hidden_by_filter)
         self._update_divider_mod_counts()
 
     def get_dividers_data(self) -> list[dict[str, Any]]:
@@ -3558,27 +3549,18 @@ class ModListWidget(QListWidget):
                 for member_item in member_items:
                     member_data = member_item.data(Qt.ItemDataRole.UserRole)
                     member_data.__dict__["collection_set_key"] = key
-                if len(member_items) < 2:
+                if len(member_items) < 2 or group.members[0] not in self.paths:
                     continue
-                insertion = min(self.row(item) for item in member_items)
-                representative = member_items[0]
-                ordered = [representative, *sorted(member_items[1:], key=self.row)]
-                for item in reversed(ordered):
-                    row = self.row(item)
-                    self.takeItem(row)
-                    self.paths.pop(row)
-
+                representative_path = group.members[0]
                 collapsed = key not in self._expanded_collection_sets
-                for offset, item in enumerate(ordered):
+                for item in member_items:
                     data = item.data(Qt.ItemDataRole.UserRole)
-                    is_parent = offset == 0
+                    is_parent = data["path"] == representative_path
                     data.__dict__["collection_parent"] = is_parent
                     data.__dict__["collection_child"] = not is_parent
                     data.__dict__["collection_set_key"] = key
-                    data.__dict__["collection_member_count"] = len(ordered) - 1
+                    data.__dict__["collection_member_count"] = len(member_items) - 1
                     data.__dict__["collection_collapsed"] = collapsed
-                    self.insertItem(insertion + offset, item)
-                    self.paths.insert(insertion + offset, data["path"])
                     item.setHidden(collapsed and not is_parent)
                     widget = self.itemWidget(item)
                     if isinstance(widget, ModListItemInner):
@@ -3616,10 +3598,14 @@ class ModListWidget(QListWidget):
             widget = self.itemWidget(item)
             if isinstance(widget, ModListItemInner):
                 widget.set_collection_parent(key, collapsed)
-            count = int(data.__dict__.get("collection_member_count", 0))
-            for child_row in range(row + 1, min(self.count(), row + 1 + count)):
+            for child_row in range(self.count()):
                 child = self.item(child_row)
                 child_data = child.data(Qt.ItemDataRole.UserRole)
+                if not child_data.__dict__.get("collection_child", False):
+                    continue
+                if child_data.__dict__.get("collection_set_key", "") != key:
+                    continue
+                child_data.__dict__["collection_collapsed"] = collapsed
                 child.setHidden(
                     collapsed
                     or bool(child_data.__dict__.get("hidden_by_filter", False))

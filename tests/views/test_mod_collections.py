@@ -104,33 +104,33 @@ def test_drop_mod_onto_mod_creates_and_extends_set(
     assert controller.collections.sets[key].name == controller.mod_name(paths[1])
     assert controller.collections.sets[key].members == [paths[1], paths[0]]
     assert original_order == paths
-    parent = source.item(0)
+    parent = controller.items(source)[paths[1]]
     parent_data = parent.data(Qt.ItemDataRole.UserRole)
     assert parent_data["path"] == paths[1]
     assert parent_data.__dict__["collection_set_key"] == key
     assert parent_data.__dict__["collection_parent"]
     assert parent_data.__dict__["collection_collapsed"]
-    assert source.item(1).isHidden()
+    assert source.item(0).isHidden()
+    assert not source.item(1).isHidden()
     assert not source.item(2).isHidden()
     assert [path for path in source.paths if not path.startswith("__divider__")] == [
-        paths[1],
         paths[0],
+        paths[1],
         paths[2],
         paths[3],
     ]
 
     source.toggle_collection_set(key)
-    assert not source.item(1).isHidden()
-    assert source.item(1).text().startswith("Mod ")
+    assert not source.item(0).isHidden()
     QApplication.processEvents()
-    parent_widget = source.itemWidget(source.item(0))
+    parent_widget = source.itemWidget(source.item(1))
     assert isinstance(parent_widget, ModListItemInner)
     assert parent_widget.list_item_name == controller.mod_name(paths[1])
-    child_widget = source.itemWidget(source.item(1))
+    child_widget = source.itemWidget(source.item(0))
     assert isinstance(child_widget, ModListItemInner)
     assert child_widget.list_item_name == controller.mod_name(paths[0])
-    assert source.itemWidget(source.item(1)) is not None
-    assert source.item(1).text() == ""
+    assert source.itemWidget(source.item(0)) is not None
+    assert source.item(0).text() == ""
 
     source.clearSelection()
     parent.setSelected(True)
@@ -419,7 +419,7 @@ def test_group_operations_save_once_and_activation_does_not_save_settings(
     save.assert_not_called()
 
 
-def test_split_set_is_rejoined_in_dependency_order(
+def test_split_set_preserves_independent_activation_order(
     collections_panel: ModsPanel,
 ) -> None:
     view, key, paths = grouped_view(collections_panel)
@@ -439,9 +439,31 @@ def test_split_set_is_rejoined_in_dependency_order(
     controller.set_enabled([paths[0]], True)
     QApplication.processEvents()
 
-    assert controller.active_list.paths[:2] == controller.collections.members(
-        "set", key
+    assert controller.active_list.paths[:2] == [paths[1], paths[0]]
+    assert controller.collections.members("set", key) == paths[:2]
+
+
+def test_set_rendering_keeps_load_order_warning_based_on_real_positions(
+    collections_panel: ModsPanel,
+) -> None:
+    controller = collections_panel.collections_panel.controller
+    source = controller.inactive_list
+    paths = list(source.paths)
+    first = controller.metadata.mods_metadata[paths[0]]
+    second = controller.metadata.mods_metadata[paths[1]]
+    first.about_rules.load_after.add(second.package_id)
+    first.clear_cache()
+
+    controller.create("set", str(second.name), [paths[1], paths[0]], [])
+
+    assert source.paths == paths
+    load_before, load_after = source._check_load_order_violations(
+        first,
+        {str(first.package_id): paths[0], str(second.package_id): paths[1]},
+        source.paths.index(paths[0]),
     )
+    assert load_before == set()
+    assert load_after == {str(second.package_id)}
 
 
 def test_create_group_uses_real_list_selection_and_saves_once(
