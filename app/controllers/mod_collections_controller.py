@@ -86,6 +86,11 @@ class ModCollectionsController(QObject):
 
     def refresh(self) -> None:
         self.timer.stop()
+        available_paths = set(self.items(self.active_list)) | set(
+            self.items(self.inactive_list)
+        )
+        if self._repair_renamed_members(self.collections, available_paths):
+            self.settings.save()
         set_members = {
             path for group in self.collections.sets.values() for path in group.members
         }
@@ -103,6 +108,35 @@ class ModCollectionsController(QObject):
         for source in (self.active_list, self.inactive_list):
             source.apply_collection_sets(self.collections)
         self.changed.emit()
+
+    @staticmethod
+    def _repair_renamed_members(
+        collections: ModCollections, available_paths: set[str]
+    ) -> bool:
+        """Rebind Windows-invalid colon names renamed with an underscore."""
+        changed = False
+        member_owners = {
+            path: key
+            for key, group in collections.sets.items()
+            for path in group.members
+        }
+        for key, group in collections.sets.items():
+            group_changed = False
+            for index, path in enumerate(group.members):
+                if path in available_paths or "\uf03a" not in path:
+                    continue
+                candidate = path.replace("\uf03a", "_")
+                if (
+                    candidate in available_paths
+                    and member_owners.get(candidate, key) == key
+                ):
+                    group.members[index] = candidate
+                    member_owners[candidate] = key
+                    group_changed = True
+                    changed = True
+            if group_changed:
+                group.members = list(dict.fromkeys(group.members))
+        return changed
 
     def _save(self) -> None:
         self.settings.save()

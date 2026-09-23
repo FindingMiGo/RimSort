@@ -10,12 +10,14 @@ from PySide6.QtTest import QSignalSpy
 from PySide6.QtWidgets import QApplication, QInputDialog, QLabel, QTreeWidgetItem
 from pytestqt.qtbot import QtBot
 
+from app.controllers.mod_collections_controller import ModCollectionsController
 from app.models.instance import Instance
 from app.models.metadata.metadata_structure import (
     AboutXmlMod,
     CaseInsensitiveStr,
     ModType,
 )
+from app.models.mod_collections import ModCollections
 from app.models.settings import Settings
 from app.utils.custom_list_widget_item import CustomListWidgetItem
 from app.utils.custom_list_widget_item_metadata import CustomListWidgetItemMetadata
@@ -80,6 +82,38 @@ def grouped_view(panel: ModsPanel) -> tuple[ModCollectionsPanel, str, list[str]]
     paths = list(controller.items(controller.inactive_list))
     key = controller.create("set", "Translations", paths[:2], [])
     return view, key, paths
+
+
+def test_renamed_translation_folder_rebinds_saved_set_member() -> None:
+    collections = ModCollections()
+    key = collections.create("set", "[RH2] Faction: Militaires Sans Frontieres")
+    base = r"C:\Steam\workshop\3207066520"
+    old_translation = (
+        "C:\\RimWorld\\Mods\\[RH2] Faction\uf03a Militaires Sans Frontieres JP"
+    )
+    translation = r"C:\RimWorld\Mods\[RH2] Faction_ Militaires Sans Frontieres JP"
+    collections.sets[key].members = [base, old_translation]
+
+    assert ModCollectionsController._repair_renamed_members(
+        collections, {base, translation}
+    )
+    assert collections.sets[key].members == [base, translation]
+    assert not ModCollectionsController._repair_renamed_members(
+        collections, {base, translation}
+    )
+
+
+def test_renamed_member_does_not_steal_another_set_member() -> None:
+    collections = ModCollections()
+    old_key = collections.create("set", "Old set")
+    other_key = collections.create("set", "Other set")
+    old_path = "C:\\Mods\\[RH2] Faction\uf03a JP"
+    new_path = r"C:\Mods\[RH2] Faction_ JP"
+    collections.sets[old_key].members = [old_path]
+    collections.sets[other_key].members = [new_path]
+
+    assert not ModCollectionsController._repair_renamed_members(collections, {new_path})
+    assert collections.sets[old_key].members == [old_path]
 
 
 def first_group(view: ModCollectionsPanel) -> QTreeWidgetItem:
