@@ -410,6 +410,12 @@ class ModListItemInner(QWidget):
         self.collection_toggle_button.setText("▶" if collapsed else "▼")
         self.collection_toggle_button.setHidden(False)
 
+    def clear_collection_group(self) -> None:
+        """Restore the ordinary row appearance after leaving a set."""
+        self._collection_set_key = ""
+        self.collection_toggle_button.setHidden(True)
+        self.main_item_layout.setContentsMargins(0, 0, 0, 0)
+
     def _emit_collection_toggle(self) -> None:
         if self._collection_set_key:
             self.toggle_collection_signal.emit(self._collection_set_key)
@@ -3082,6 +3088,7 @@ class ModListWidget(QListWidget):
             )
             widget.toggle_warning_signal.connect(self.toggle_warning)
             widget.toggle_error_signal.connect(self.toggle_warning)
+            widget.toggle_collection_signal.connect(self.toggle_collection_set)
             if not item.sizeHint().isValid():
                 item.setSizeHint(widget.sizeHint())
             # The item text is only a lightweight placeholder while the real
@@ -3097,7 +3104,6 @@ class ModListWidget(QListWidget):
                     set_key,
                     bool(data.__dict__.get("collection_collapsed", True)),
                 )
-                widget.toggle_collection_signal.connect(self.toggle_collection_set)
 
             # Apply translation status if enabled
             if self.show_translation_status:
@@ -3539,6 +3545,9 @@ class ModListWidget(QListWidget):
                 data.__dict__["collection_member_count"] = 0
                 data.__dict__["collection_collapsed"] = False
                 item.setHidden(False)
+                widget = self.itemWidget(item)
+                if isinstance(widget, ModListItemInner):
+                    widget.clear_collection_group()
 
             for key, group in collections.sets.items():
                 member_items = [

@@ -153,6 +153,29 @@ def test_drop_requires_a_different_selected_mod(collections_panel: ModsPanel) ->
     assert not source._request_set_from_drop(source.item(0))
 
 
+def test_deleting_set_clears_parent_toggle_and_child_indent(
+    collections_panel: ModsPanel,
+) -> None:
+    view, key, paths = grouped_view(collections_panel)
+    controller = view.controller
+    source = controller.inactive_list
+    source.toggle_collection_set(key)
+    QApplication.processEvents()
+    parent_widget = source.itemWidget(source.item(0))
+    child_widget = source.itemWidget(source.item(1))
+    assert isinstance(parent_widget, ModListItemInner)
+    assert isinstance(child_widget, ModListItemInner)
+    assert not parent_widget.collection_toggle_button.isHidden()
+    assert child_widget.main_item_layout.contentsMargins().left() == 24
+
+    controller.delete("set", key)
+
+    assert parent_widget.collection_toggle_button.isHidden()
+    assert parent_widget._collection_set_key == ""
+    assert child_widget.main_item_layout.contentsMargins().left() == 0
+    assert set(controller.items(source)) == set(paths)
+
+
 def test_double_clicking_representative_activates_whole_set(
     collections_panel: ModsPanel,
 ) -> None:
