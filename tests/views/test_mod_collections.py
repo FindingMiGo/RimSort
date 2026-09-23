@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtTest import QSignalSpy
-from PySide6.QtWidgets import QApplication, QInputDialog, QTreeWidgetItem
+from PySide6.QtWidgets import QApplication, QInputDialog, QLabel, QTreeWidgetItem
 from pytestqt.qtbot import QtBot
 
 from app.models.instance import Instance
@@ -121,16 +121,28 @@ def test_drop_mod_onto_mod_creates_and_extends_set(
     ]
 
     source.toggle_collection_set(key)
-    assert not source.item(0).isHidden()
+    assert source.item(0).isHidden()
     QApplication.processEvents()
     parent_widget = source.itemWidget(source.item(1))
     assert isinstance(parent_widget, ModListItemInner)
     assert parent_widget.list_item_name == controller.mod_name(paths[1])
-    child_widget = source.itemWidget(source.item(0))
-    assert isinstance(child_widget, ModListItemInner)
-    assert child_widget.list_item_name == controller.mod_name(paths[0])
-    assert source.itemWidget(source.item(0)) is not None
-    assert source.item(0).text() == ""
+    assert not parent_widget.collection_children_widget.isHidden()
+    assert parent_widget.collection_children_layout.count() == 1
+    child_layout_item = parent_widget.collection_children_layout.itemAt(0)
+    assert child_layout_item is not None
+    child_label = child_layout_item.widget()
+    assert isinstance(child_label, QLabel)
+    assert child_label.text() == f"↳ #1 {controller.mod_name(paths[0])}"
+    child_data = source.item(0).data(Qt.ItemDataRole.UserRole)
+    child_data["warnings"] = "Load-order warning"
+    child_data["errors_warnings"] = "Load-order warning"
+    source.refresh_collection_summaries()
+    refreshed_child = parent_widget.collection_children_layout.itemAt(0)
+    assert refreshed_child is not None
+    refreshed_label = refreshed_child.widget()
+    assert isinstance(refreshed_label, QLabel)
+    assert refreshed_label.text() == f"↳ #1 ⚠ {controller.mod_name(paths[0])}"
+    assert refreshed_label.toolTip() == "Load-order warning"
 
     source.clearSelection()
     parent.setSelected(True)
@@ -166,13 +178,15 @@ def test_deleting_set_clears_parent_toggle_and_child_indent(
     assert isinstance(parent_widget, ModListItemInner)
     assert isinstance(child_widget, ModListItemInner)
     assert not parent_widget.collection_toggle_button.isHidden()
-    assert child_widget.main_item_layout.contentsMargins().left() == 24
+    assert not parent_widget.collection_children_widget.isHidden()
+    assert source.item(1).isHidden()
 
     controller.delete("set", key)
 
     assert parent_widget.collection_toggle_button.isHidden()
     assert parent_widget._collection_set_key == ""
-    assert child_widget.main_item_layout.contentsMargins().left() == 0
+    assert parent_widget.collection_children_widget.isHidden()
+    assert not source.item(1).isHidden()
     assert set(controller.items(source)) == set(paths)
 
 
@@ -451,6 +465,8 @@ def test_set_rendering_keeps_load_order_warning_based_on_real_positions(
     paths = list(source.paths)
     first = controller.metadata.mods_metadata[paths[0]]
     second = controller.metadata.mods_metadata[paths[1]]
+    assert isinstance(first, AboutXmlMod)
+    assert isinstance(second, AboutXmlMod)
     first.about_rules.load_after.add(second.package_id)
     first.clear_cache()
 
