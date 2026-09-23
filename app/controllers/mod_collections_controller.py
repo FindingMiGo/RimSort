@@ -160,6 +160,24 @@ class ModCollectionsController(QObject):
         collections.group(kind, key)
         if kind == "set":
             collections.assign_set(paths, key)
+            members = collections.sets[key].members
+            if members:
+                active_paths = self.items(self.active_list)
+                inactive_paths = self.items(self.inactive_list)
+                representative = members[0]
+                if representative in active_paths:
+                    misplaced = [path for path in members if path in inactive_paths]
+                    enabled = True
+                elif representative in inactive_paths:
+                    misplaced = [path for path in members if path in active_paths]
+                    enabled = False
+                else:
+                    misplaced = []
+                    enabled = False
+                if misplaced:
+                    self.settings.save()
+                    self.set_enabled(misplaced, enabled)
+                    return
         else:
             collections.move_to_folder(paths, key)
             for set_key in selected_sets or []:

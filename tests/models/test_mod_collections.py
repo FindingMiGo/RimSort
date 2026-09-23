@@ -52,6 +52,15 @@ def test_assign_set_keeps_one_membership(collections: ModCollections) -> None:
     assert collections.labels()["main"] == "Series / Main and translation"
 
 
+def test_adding_to_set_preserves_existing_representative_and_children(
+    collections: ModCollections,
+) -> None:
+    collections.assign_set(["main", "addon", "translation"], "first")
+
+    assert collections.sets["first"].members == ["main", "translation", "addon"]
+    assert collections.sets["second"].members == []
+
+
 def test_folder_moves_include_whole_sets(collections: ModCollections) -> None:
     collections.move_to_folder(
         ["translation", "standalone", "main", "standalone"], "themes"

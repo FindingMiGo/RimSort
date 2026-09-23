@@ -74,8 +74,10 @@ class ModCollections(msgspec.Struct):
 
     def assign_set(self, paths: list[str], key: str) -> None:
         group = self.sets[key]
-        self.detach(paths)
-        group.members.extend(dict.fromkeys(paths))
+        existing = set(group.members)
+        new_paths = [path for path in dict.fromkeys(paths) if path not in existing]
+        self.detach(new_paths)
+        group.members.extend(new_paths)
 
     def _validate_folder(self, key: str) -> None:
         if key and key not in self.folders:

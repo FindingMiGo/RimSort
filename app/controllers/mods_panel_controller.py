@@ -60,12 +60,6 @@ class ModsPanelController(QObject):
         EventBus().do_change_mod_coloring_mode.connect(
             self._on_change_mod_coloring_mode
         )
-        EventBus().filters_changed_in_active_modlist.connect(
-            self._on_filters_changed_in_active_modlist
-        )
-        EventBus().filters_changed_in_inactive_modlist.connect(
-            self._on_filters_changed_in_inactive_modlist
-        )
         EventBus().do_delete_outdated_entries_in_aux_db.connect(
             self.delete_outdated_aux_db_entries
         )
@@ -79,38 +73,6 @@ class ModsPanelController(QObject):
         EventBus().do_auto_add_translations.connect(
             self.mods_panel._on_auto_add_translations
         )
-
-    def _reemit_active_filter_signal(self) -> None:
-        """Re-emit the active filter label's click signal to reapply filtering."""
-
-        if self.warnings_label_active:
-            self.mods_panel.warnings_text.clicked.emit()
-        elif self.errors_label_active:
-            self.mods_panel.errors_text.clicked.emit()
-        elif (
-            self.news_label_active
-            and hasattr(self.mods_panel, "new_text")
-            and self.settings.show_save_comparison_indicators
-        ):
-            self.mods_panel.new_text.clicked.emit()
-        elif (
-            self.updated_label_active
-            and hasattr(self.mods_panel, "updated_text")
-            and self.settings.mod_list_updated_indicator
-        ):
-            self.mods_panel.updated_text.clicked.emit()
-
-    @Slot()
-    def _on_filters_changed_in_active_modlist(self) -> None:
-        """When filters are changed in the active modlist."""
-
-        self._reemit_active_filter_signal()
-
-    @Slot()
-    def _on_filters_changed_in_inactive_modlist(self) -> None:
-        """When filters are changed in the inactive modlist."""
-
-        self._reemit_active_filter_signal()
 
     @Slot()
     def _on_menu_bar_reset_warnings_triggered(self) -> None:
@@ -296,27 +258,10 @@ class ModsPanelController(QObject):
         logger.debug("Finished hiding mods that were not recently updated.")
 
     def __change_visibility_helper(self, label_active: bool, type: str) -> None:
-        active_mods = self.mods_panel.active_mods_list.get_all_mod_list_items()
-        for mod in active_mods:
-            mod_data = mod.data(Qt.ItemDataRole.UserRole)
-            if type == "new_text":
-                apply_filter = not bool(mod_data.__dict__.get("is_new", False))
-            elif type == "updated_text":
-                apply_filter = not bool(
-                    mod_data.__dict__.get("is_recently_updated", False)
-                )
-            else:
-                apply_filter = mod_data[type] == ""
-
-            # If a mod is already hidden becasue of filters, dont unhide it
-            if apply_filter:
-                if label_active:
-                    mod.setHidden(True)
-                elif not mod_data["hidden_by_filter"]:
-                    mod.setHidden(False)
-        self.mods_panel.update_count("Active")
-        self.mods_panel.active_mods_list.repaint()
-        self.mods_panel.active_mods_list.check_widgets_visible()
+        self.mods_panel.active_mods_list.summary_filter = type if label_active else None
+        self.mods_panel.signal_search_and_filters(
+            "Active", self.mods_panel.active_mods_search.text()
+        )
 
     def do_all_entries_in_aux_db_as_outdated(self) -> None:
         """

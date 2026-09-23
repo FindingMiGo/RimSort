@@ -1265,6 +1265,8 @@ class ModListWidget(QListWidget):
 
         # Cache list_type for later use
         self.list_type = list_type
+        # Summary labels filter the active list alongside search and tag filters.
+        self.summary_filter: str | None = None
 
         # Cache MetadataController instance
         self.metadata_controller = metadata_controller
@@ -1484,6 +1486,7 @@ class ModListWidget(QListWidget):
             data["path"]
             for item in self.selectedItems()
             if (data := item.data(Qt.ItemDataRole.UserRole)) is not None
+            and not item.isHidden()
             and not getattr(data, "is_divider", False)
             and data["path"] != target_path
         ]
@@ -2966,7 +2969,7 @@ class ModListWidget(QListWidget):
         settings.color_picker_custom_colors = colors
         settings.save()
 
-    def append_new_item(self, uuid: str) -> None:
+    def append_new_item(self, uuid: str, index: int | None = None) -> None:
         if uuid not in self.metadata_controller.mods_metadata:
             logger.error(f"Attempted to append item with uuid not in metadata: {uuid}")
             return
@@ -2994,7 +2997,10 @@ class ModListWidget(QListWidget):
         # when it fires after addItem, and can correctly track the UUID in self.paths.
         item = CustomListWidgetItem()
         item.setData(Qt.ItemDataRole.UserRole, data, avoid_emit=True)
-        self.addItem(item)
+        if index is None:
+            self.addItem(item)
+        else:
+            self.insertItem(min(index, self.count()), item)
 
     def update_collection_labels(
         self, labels: dict[str, str], items: dict[str, CustomListWidgetItem]
@@ -3023,6 +3029,13 @@ class ModListWidget(QListWidget):
                 continue
             mod_list_items.append(item)
         return mod_list_items
+
+    def get_all_mod_paths(self) -> list[str]:
+        """Return live mod paths, excluding divider rows and stale path cache entries."""
+        return [
+            item.data(Qt.ItemDataRole.UserRole)["path"]
+            for item in self.get_all_mod_list_items()
+        ]
 
     def get_all_loaded_mod_list_items(self) -> list[ModListItemInner]:
         """
@@ -3428,13 +3441,9 @@ class ModListWidget(QListWidget):
         if uuid not in self.paths:
             return
         idx = self.paths.index(uuid)
-        # Expand hidden items first so they become visible
-        next_div = self._find_next_divider_index(idx + 1)
-        for i in range(idx + 1, next_div):
-            self.item(i).setHidden(False)
         self.paths.pop(idx)
         self.takeItem(idx)
-        self._update_divider_mod_counts()
+        self.apply_collapse_states()
         self.list_update_signal.emit(str(self.count()))
 
     def rename_divider(self, uuid: str, new_name: str) -> None:
@@ -3466,11 +3475,7 @@ class ModListWidget(QListWidget):
         widget = self.itemWidget(item)
         if isinstance(widget, DividerItemInner):
             widget.set_collapsed(data.collapsed)
-        next_div = self._find_next_divider_index(idx + 1)
-        if set_key:
-            next_div = min(self.count(), idx + 1 + data.collection_member_count)
-        for i in range(idx + 1, next_div):
-            self.item(i).setHidden(data.collapsed)
+        self.apply_collapse_states()
         self._update_single_divider_mod_count(item)
         if set_key and not data.collapsed:
             self.check_widgets_visible()
@@ -3576,6 +3581,7 @@ class ModListWidget(QListWidget):
                 data.__dict__["collection_parent"] = False
                 data.__dict__["collection_set_key"] = ""
                 data.__dict__["collection_member_count"] = 0
+                data.__dict__["collection_member_order"] = 0
                 data.__dict__["collection_collapsed"] = False
                 data.__dict__["collection_children"] = []
                 data.__dict__["collection_search_paths"] = []
@@ -3585,39 +3591,52 @@ class ModListWidget(QListWidget):
                     widget.clear_collection_group()
                 self._sync_collection_row_height(item)
 
+            items_by_path = {
+                item.data(Qt.ItemDataRole.UserRole)["path"]: item
+                for item in self.get_all_mod_list_items()
+            }
+            parents: list[tuple[str, CustomListWidgetItem]] = []
             for key, group in collections.sets.items():
                 member_items = [
-                    self.item(self.paths.index(path))
+                    items_by_path[path]
                     for path in group.members
-                    if path in self.paths
+                    if path in items_by_path
                 ]
                 for member_item in member_items:
                     member_data = member_item.data(Qt.ItemDataRole.UserRole)
                     member_data.__dict__["collection_set_key"] = key
-                if len(member_items) < 2 or group.members[0] not in self.paths:
+                if len(member_items) < 2:
                     continue
-                representative_path = group.members[0]
+                representative_path = member_items[0].data(Qt.ItemDataRole.UserRole)[
+                    "path"
+                ]
                 collapsed = key not in self._expanded_collection_sets
-                for item in member_items:
+                for member_order, item in enumerate(member_items):
                     data = item.data(Qt.ItemDataRole.UserRole)
                     is_parent = data["path"] == representative_path
                     data.__dict__["collection_parent"] = is_parent
                     data.__dict__["collection_child"] = not is_parent
                     data.__dict__["collection_set_key"] = key
                     data.__dict__["collection_member_count"] = len(member_items) - 1
+                    data.__dict__["collection_member_order"] = member_order
                     data.__dict__["collection_collapsed"] = collapsed
                     item.setHidden(not is_parent)
-                children = self._collection_child_summaries(key)
                 for item in member_items:
                     data = item.data(Qt.ItemDataRole.UserRole)
                     is_parent = data["path"] == representative_path
                     if is_parent:
-                        data.__dict__["collection_children"] = children
-                    widget = self.itemWidget(item)
-                    if isinstance(widget, ModListItemInner) and is_parent:
-                        widget.set_collection_parent(key, collapsed, children)
-                    if is_parent:
-                        self._sync_collection_row_height(item)
+                        parents.append((key, item))
+            summaries = self._collection_summaries_by_key()
+            for key, item in parents:
+                data = item.data(Qt.ItemDataRole.UserRole)
+                children = summaries.get(key, [])
+                data.__dict__["collection_children"] = children
+                widget = self.itemWidget(item)
+                if isinstance(widget, ModListItemInner):
+                    widget.set_collection_parent(
+                        key, bool(data.__dict__["collection_collapsed"]), children
+                    )
+                self._sync_collection_row_height(item)
         finally:
             self.model().rowsInserted.connect(
                 self.handle_rows_inserted, Qt.ConnectionType.QueuedConnection
@@ -3666,42 +3685,47 @@ class ModListWidget(QListWidget):
 
     def _collection_child_summaries(self, key: str) -> list[tuple[str, str]]:
         """Return child labels annotated with their authoritative load positions."""
-        positions = {
-            path: position
-            for position, path in enumerate(
-                (path for path in self.paths if not is_divider_uuid(path)), start=1
-            )
-        }
-        children: list[tuple[str, str]] = []
-        search_paths: set[str] = set()
-        for parent_item in self.get_all_mod_list_items():
-            parent_data = parent_item.data(Qt.ItemDataRole.UserRole)
-            if parent_data.__dict__.get("collection_parent", False) and (
-                parent_data.__dict__.get("collection_set_key", "") == key
-            ):
-                search_paths = set(
-                    parent_data.__dict__.get("collection_search_paths", [])
-                )
-                break
-        for item in self.get_all_mod_list_items():
+        return self._collection_summaries_by_key().get(key, [])
+
+    def _collection_summaries_by_key(self) -> dict[str, list[tuple[str, str]]]:
+        """Summarize all sets in one pass over the authoritative Qt rows."""
+        items = self.get_all_mod_list_items()
+        search_paths_by_key: dict[str, set[str]] = {}
+        for item in items:
             data = item.data(Qt.ItemDataRole.UserRole)
+            if data.__dict__.get("collection_parent", False):
+                key = data.__dict__.get("collection_set_key", "")
+                search_paths_by_key[key] = set(
+                    data.__dict__.get("collection_search_paths", [])
+                )
+        ordered_summaries: dict[str, list[tuple[int, str, str]]] = {}
+        position = 0
+        for item in items:
+            data = item.data(Qt.ItemDataRole.UserRole)
+            if getattr(data, "is_divider", False):
+                continue
+            position += 1
             if not data.__dict__.get("collection_child", False):
                 continue
-            if data.__dict__.get("collection_set_key", "") != key:
-                continue
+            key = data.__dict__.get("collection_set_key", "")
+            search_paths = search_paths_by_key.get(key, set())
             path = data["path"]
             if search_paths and path not in search_paths:
                 continue
             mod = self.metadata_controller.get_mod(path)
             name = str(mod.name) if mod and mod.name else path
             marker = "❗ " if data["errors"] else "⚠ " if data["warnings"] else ""
-            children.append(
+            ordered_summaries.setdefault(key, []).append(
                 (
-                    f"#{positions.get(path, 0)} {marker}{name}",
+                    int(data.__dict__.get("collection_member_order", 0)),
+                    f"#{position} {marker}{name}",
                     data["errors_warnings"],
                 )
             )
-        return children
+        return {
+            key: [(label, tooltip) for _, label, tooltip in sorted(children)]
+            for key, children in ordered_summaries.items()
+        }
 
     def _sync_collection_row_height(self, item: CustomListWidgetItem) -> None:
         """Reserve the expanded height even before its row widget is created."""
@@ -3732,6 +3756,7 @@ class ModListWidget(QListWidget):
             key = data.__dict__.get("collection_set_key", "")
             if key:
                 groups.setdefault(key, []).append(item)
+        parents: list[tuple[str, CustomListWidgetItem]] = []
         for key, members in groups.items():
             parent = next(
                 (
@@ -3760,7 +3785,12 @@ class ModListWidget(QListWidget):
                 parent_data["filtered"] = False
                 parent_data.__dict__["hidden_by_filter"] = False
                 parent.setHidden(False)
-            children = self._collection_child_summaries(key)
+            parents.append((key, parent))
+        summaries = self._collection_summaries_by_key()
+        for key, parent in parents:
+            parent_data = parent.data(Qt.ItemDataRole.UserRole)
+            visible_child_matches = parent_data.__dict__["collection_search_paths"]
+            children = summaries.get(key, [])
             parent_data.__dict__["collection_children"] = children
             widget = self.itemWidget(parent)
             if isinstance(widget, ModListItemInner):
@@ -3772,6 +3802,7 @@ class ModListWidget(QListWidget):
 
     def refresh_collection_summaries(self) -> None:
         """Refresh expanded child labels after load-order warnings change."""
+        summaries = self._collection_summaries_by_key()
         for item in self.get_all_mod_list_items():
             data = item.data(Qt.ItemDataRole.UserRole)
             if not data.__dict__.get("collection_parent", False):
@@ -3779,7 +3810,7 @@ class ModListWidget(QListWidget):
             key = data.__dict__.get("collection_set_key", "")
             if not key:
                 continue
-            children = self._collection_child_summaries(key)
+            children = summaries.get(key, [])
             data.__dict__["collection_children"] = children
             widget = self.itemWidget(item)
             if isinstance(widget, ModListItemInner):
@@ -4423,7 +4454,9 @@ class ModListWidget(QListWidget):
             descending=descending,
             settings=self.settings,
         )
+        dividers = self.get_dividers_data()
         self.recreate_mod_list(list_type, sorted_uuids, filtering=True)
+        self.restore_dividers(dividers)
 
     def recreate_mod_list(
         self, list_type: str, uuids: list[str], filtering: bool = False
@@ -4500,7 +4533,7 @@ class ModListWidget(QListWidget):
                 self.addItem(list_item)
                 # When refreshing, update entry if needed?
             # Set uuids list to match the widget after all items are added
-            self.paths = list(uuids)
+            self.paths = [uuid for uuid in uuids if not is_divider_uuid(uuid)]
 
         else:  # ...unless we don't have mods, at which point reenable updates and exit
             self.setUpdatesEnabled(True)
@@ -4758,6 +4791,7 @@ class ModsPanel(QWidget):
         logger.debug("Initializing ModsPanel")
         self.metadata_controller = metadata_controller
         self.settings = settings
+        self._deleted_active_mod_positions: dict[str, int] = {}
 
         # Load inactive mods sort settings
         if self.settings.save_inactive_mods_sort_state:
@@ -4776,12 +4810,10 @@ class ModsPanel(QWidget):
         self._size_current_uuids: list[str] = []
 
         # Debounce timer for non-heavy sort operations
-        self._sort_debounce_timer = QTimer()
+        self._sort_debounce_timer = QTimer(self)
         self._sort_debounce_timer.setSingleShot(True)
         self._sort_debounce_timer.timeout.connect(self._execute_pending_sort)
-        self._pending_sort_params: (
-            tuple[str, list[str], ModsPanelSortKey, bool] | None
-        ) = None
+        self._pending_sort_params: tuple[str, ModsPanelSortKey, bool] | None = None
 
         # Base layout with a splitter for resizable mod lists
         self.panel = QVBoxLayout()
@@ -4902,6 +4934,30 @@ class ModsPanel(QWidget):
         )
         self.collections_panel = ModCollectionsPanel(controller, self)
         self.collections_panel.hide()
+        controller.changed.connect(self._reapply_collection_filters)
+
+    def _reapply_collection_filters(self) -> None:
+        """Restore search and summary visibility after collection rows are rebuilt."""
+        for list_type, search, mod_list, filter_button in (
+            (
+                "Active",
+                self.active_mods_search,
+                self.active_mods_list,
+                self.active_filter_button,
+            ),
+            (
+                "Inactive",
+                self.inactive_mods_search,
+                self.inactive_mods_list,
+                self.inactive_filter_button,
+            ),
+        ):
+            if (
+                search.text()
+                or filter_button.filter_panel.filter_state.has_active_filters()
+                or mod_list.summary_filter
+            ):
+                self.signal_search_and_filters(list_type, search.text())
 
     def initialize_active_mods_search_widgets(self) -> None:
         """Initialize widgets for active mods search layout."""
@@ -5261,9 +5317,22 @@ class ModsPanel(QWidget):
         Args:
             sizes: Dictionary mapping mod UUID -> folder size in bytes
         """
+        retry_with_live_paths = False
         try:
             # Sort and rebuild with visible progress to avoid post-close pause
-            current_uuids: list[str] = getattr(self, "_size_current_uuids", [])
+            current_uuids = self.inactive_mods_list.get_all_mod_paths()
+            if (
+                set(current_uuids) != set(self._size_current_uuids)
+                or self.inactive_mods_sort_combobox.currentData()
+                != ModsPanelSortKey.FOLDER_SIZE
+            ):
+                # The worker's result no longer covers the live list. Never
+                # rebuild from its stale snapshot or override a newer sort.
+                retry_with_live_paths = (
+                    self.inactive_mods_sort_combobox.currentData()
+                    == ModsPanelSortKey.FOLDER_SIZE
+                )
+                return
             sorted_uuids = sorted(
                 current_uuids,
                 key=lambda u: sizes.get(u, 0),
@@ -5285,6 +5354,7 @@ class ModsPanel(QWidget):
             except TypeError:
                 pass  # Signal not connected
 
+            dividers = lw.get_dividers_data()
             lw.clear()
             lw.paths = []
 
@@ -5320,6 +5390,7 @@ class ModsPanel(QWidget):
                 lw.handle_rows_removed, Qt.ConnectionType.QueuedConnection
             )
             lw.setUpdatesEnabled(True)
+            lw.restore_dividers(dividers)
             lw.repaint()
             # Load visible widgets after rebuild completes
             lw.check_widgets_visible()
@@ -5331,16 +5402,18 @@ class ModsPanel(QWidget):
                 self._size_progress_dialog = None
             QApplication.restoreOverrideCursor()
             if hasattr(self, "_size_thread") and self._size_thread:
-                # Let the thread finish asynchronously and clean up safely
+                # QObject deletion is connected to QThread.finished; deleting
+                # the thread here can race with its event-loop shutdown.
                 self._size_thread.quit()
-                self._size_thread.deleteLater()
                 self._size_thread = None
-            if hasattr(self, "_size_worker") and self._size_worker:
-                try:
-                    self._size_worker.deleteLater()
-                except Exception:  # noqa: S110
-                    pass
-                self._size_worker = None
+            self._size_worker = None
+            if retry_with_live_paths:
+                QTimer.singleShot(
+                    0,
+                    lambda: self.on_inactive_mods_sort_changed(
+                        self.inactive_mods_sort_combobox.currentText()
+                    ),
+                )
 
     def _execute_pending_sort(self) -> None:
         """
@@ -5352,7 +5425,7 @@ class ModsPanel(QWidget):
         Uses _pending_sort_params stored by on_inactive_mods_sort_changed.
         """
         if self._pending_sort_params:
-            list_type, uuids, key, descending = self._pending_sort_params
+            list_type, key, descending = self._pending_sort_params
             self._pending_sort_params = None
             # Get the appropriate list widget and call recreate_mod_list_and_sort
             mod_list = (
@@ -5360,7 +5433,9 @@ class ModsPanel(QWidget):
                 if list_type == "Active"
                 else self.inactive_mods_list
             )
-            mod_list.recreate_mod_list_and_sort(list_type, uuids, key, descending)
+            mod_list.recreate_mod_list_and_sort(
+                list_type, mod_list.get_all_mod_paths(), key, descending
+            )
 
     @staticmethod
     def _text_to_sort_key(text: str) -> ModsPanelSortKey:
@@ -5409,12 +5484,16 @@ class ModsPanel(QWidget):
             sort_key = ModsPanelSortKey.FILESYSTEM_MODIFIED_TIME
 
         # Get current list of paths to sort
-        current_uuids = self.inactive_mods_list.paths.copy()
+        current_uuids = self.inactive_mods_list.get_all_mod_paths()
         if current_uuids:
             # Folder size sorting requires background calculation
             # Other sorts are fast data lookups using debounce
             is_heavy = sort_key == ModsPanelSortKey.FOLDER_SIZE
             if is_heavy:
+                self._sort_debounce_timer.stop()
+                self._pending_sort_params = None
+                if self._size_thread is not None:
+                    return
                 # Background calculation required for folder size sorting
                 dlg = QProgressDialog(self.window())
                 dlg.setLabelText(self.tr("Calculating folder sizes..."))
@@ -5435,6 +5514,8 @@ class ModsPanel(QWidget):
                 worker.moveToThread(thr)
                 worker.progress.connect(self._on_folder_size_progress)
                 worker.finished.connect(self._on_folder_size_finished)
+                worker.finished.connect(worker.deleteLater)
+                thr.finished.connect(thr.deleteLater)
                 thr.started.connect(worker.run)
                 thr.start()
                 self._size_progress_dialog = dlg
@@ -5444,7 +5525,6 @@ class ModsPanel(QWidget):
                 # Store pending sort parameters
                 self._pending_sort_params = (
                     "Inactive",
-                    current_uuids,
                     sort_key,
                     self.inactive_sort_descending,
                 )
@@ -5531,11 +5611,40 @@ class ModsPanel(QWidget):
         self.signal_clear_search(list_type=list_type)
 
     def on_mod_created(self, uuid: str) -> None:
-        self.inactive_mods_list.append_new_item(uuid)
+        if uuid in self.active_mods_list.get_all_mod_paths() or uuid in (
+            self.inactive_mods_list.get_all_mod_paths()
+        ):
+            return
+        active_paths = set(self.active_mods_list.get_all_mod_paths())
+        inactive_paths = set(self.inactive_mods_list.get_all_mod_paths())
+        set_key = self.collections_panel.controller.collections.set_for(uuid)
+        set_members = (
+            self.collections_panel.controller.collections.members("set", set_key)
+            if set_key
+            else []
+        )
+        restore_active = uuid in self._deleted_active_mod_positions
+        if set_members:
+            representative = set_members[0]
+            if representative in active_paths:
+                restore_active = True
+            elif representative in inactive_paths:
+                restore_active = False
+            elif active_paths.intersection(set_members):
+                restore_active = True
+            elif inactive_paths.intersection(set_members):
+                restore_active = False
+        former_index = self._deleted_active_mod_positions.pop(uuid, None)
+        target = self.active_mods_list if restore_active else self.inactive_mods_list
+        if restore_active and former_index is not None:
+            target.append_new_item(uuid, former_index)
+        else:
+            target.append_new_item(uuid)
 
     def on_mod_deleted(self, uuid: str) -> None:
         if uuid in self.active_mods_list.paths:
             index = self.active_mods_list.paths.index(uuid)
+            self._deleted_active_mod_positions[uuid] = index
             self.active_mods_list.takeItem(index)
             self.active_mods_list.paths.pop(index)
             self.update_count(list_type="Active")
@@ -5646,6 +5755,8 @@ class ModsPanel(QWidget):
             # First time and refresh: the slot will evaluate false and do nothing.
             # Purpose: triggers the _do_save_animation slot in main_content_panel
             EventBus().list_updated_signal.emit()
+            if self.active_mods_list.summary_filter:
+                self.signal_search_and_filters("Active", self.active_mods_search.text())
         else:
             # For Inactive list: only update internal state, no display updates
             self.inactive_mods_list.check_widgets_visible()
@@ -5719,11 +5830,6 @@ class ModsPanel(QWidget):
         filter_state: bool  # The 'Hide Filter' state
         mod_list: ModListWidget
         fs: FilterState
-        # Notify controller when search bar text or any filters change
-        if list_type == "Active":
-            EventBus().filters_changed_in_active_modlist.emit()
-        elif list_type == "Inactive":
-            EventBus().filters_changed_in_inactive_modlist.emit()
         # Determine which list to filter
         if list_type == "Active":
             _filter = self.active_mods_search_filter
@@ -5739,7 +5845,16 @@ class ModsPanel(QWidget):
             raise NotImplementedError(f"Unknown list type: {list_type}")
 
         # Compute whether any filters are active
-        filters_active = bool(fs.has_active_filters() or pattern)
+        summary_filter = mod_list.summary_filter
+        summary_data_key = (
+            {
+                "new_text": "is_new",
+                "updated_text": "is_recently_updated",
+            }.get(summary_filter, summary_filter)
+            if summary_filter is not None
+            else None
+        )
+        filters_active = bool(fs.has_active_filters() or pattern or summary_filter)
 
         # Evaluate the search filter state for the list
         search_filter = None
@@ -5787,16 +5902,6 @@ class ModsPanel(QWidget):
             mod_obj = self.metadata_controller.get_mod(uuid)
             if mod_obj is None:
                 continue
-            # Hide invalid items if enabled in settings
-            if self.settings.hide_invalid_mods_when_filtering:
-                invalid = item_data["invalid"]
-                if invalid and filters_active:
-                    item_data["filtered"] = True
-                    item.setHidden(True)
-                    continue
-                elif invalid and not filters_active:
-                    item_data["filtered"] = False
-                    item.setHidden(False)
             # Re-evaluate from current inputs, not the previous highlight result.
             item_filtered = False
 
@@ -5899,32 +6004,36 @@ class ModsPanel(QWidget):
                 if not fs.matches_tags(tags_set):
                     item_filtered = True
 
+            if (
+                self.settings.hide_invalid_mods_when_filtering
+                and filters_active
+                and item_data["invalid"]
+            ):
+                item_filtered = True
+
             # Check if the item should be filtered or hidden based on filter state
-            if not item_filtered:
+            summary_matches = summary_filter is None or bool(
+                item_data.__dict__.get(summary_data_key, False)
+            )
+            if not item_filtered and summary_matches:
                 matching_paths.add(uuid)
-            if filter_state:
-                item.setHidden(item_filtered)
-                if item_filtered:
-                    item_data["hidden_by_filter"] = True
-                    item_filtered = False
-                    num_filtered += 1
-                else:
-                    item_data["hidden_by_filter"] = False
-                    num_unfiltered += 1
+            hidden_by_filter = (filter_state and item_filtered) or not summary_matches
+            item_data["hidden_by_filter"] = hidden_by_filter
+            # A set child can reveal its representative without making that
+            # representative an additional match in the count.
+            item_data.__dict__["counted_as_filtered"] = hidden_by_filter
+            item.setHidden(hidden_by_filter)
+            if hidden_by_filter:
+                num_filtered += 1
             else:
-                if item_filtered and item.isHidden():
-                    item.setHidden(False)
-                    item_data["hidden_by_filter"] = False
-                    num_unfiltered += 1
+                num_unfiltered += 1
 
             # Update item data
-            item_data["filtered"] = item_filtered
+            item_data["filtered"] = item_filtered and not filter_state
             item.setData(Qt.ItemDataRole.UserRole, item_data)
 
         self.direct_update_count(list_type, num_filtered, num_unfiltered)
-        mod_list.apply_collection_search(
-            matching_paths, bool(filter_state and filters_active)
-        )
+        mod_list.apply_collection_search(matching_paths, filters_active)
         if list_type == "Active":
             self.active_mods_list.check_widgets_visible()
             self.active_mods_list.apply_collapse_states()
@@ -6025,29 +6134,22 @@ class ModsPanel(QWidget):
             if list_type == "Active"
             else self.inactive_mods_search
         )
-        uuids = (
-            self.active_mods_list.paths
-            if list_type == "Active"
-            else self.inactive_mods_list.paths
+        mod_list = (
+            self.active_mods_list if list_type == "Active" else self.inactive_mods_list
         )
         num_filtered = 0
         num_unfiltered = 0
-        for idx in range(len(uuids)):
-            if is_divider_uuid(uuids[idx]):
-                continue
-            item = (
-                self.active_mods_list.item(idx)
-                if list_type == "Active"
-                else self.inactive_mods_list.item(idx)
-            )
-            if item is None:
-                continue
+        for item in mod_list.get_all_mod_list_items():
             item_data = item.data(Qt.ItemDataRole.UserRole)
-            if getattr(item_data, "is_divider", False):
-                continue
             item_filtered = item_data["filtered"]
 
-            if item.isHidden() or item_filtered:
+            if (
+                item_data.__dict__.get(
+                    "counted_as_filtered",
+                    item_data.__dict__.get("hidden_by_filter", False),
+                )
+                or item_filtered
+            ):
                 num_filtered += 1
             else:
                 num_unfiltered += 1
