@@ -45,6 +45,11 @@ class ModCollectionsController(QObject):
             source.delete_collection_set_signal.connect(
                 lambda key: self.delete("set", key)
             )
+            source.set_collection_enabled_signal.connect(
+                lambda key, enabled: self.set_enabled(
+                    self.collections.members("set", key), enabled
+                )
+            )
         EventBus().settings_have_changed.connect(self.schedule_refresh)
         self.schedule_refresh()
 
@@ -96,7 +101,21 @@ class ModCollectionsController(QObject):
             paths.append(tuple(items))
         self.snapshot = ModCollectionsSnapshot(*paths)
         for source in (self.active_list, self.inactive_list):
+            previous_order = tuple(source.paths)
             source.apply_collection_sets(self.collections)
+            can_recalculate = all(
+                hasattr(
+                    item.data(Qt.ItemDataRole.UserRole),
+                    "warning_toggled",
+                )
+                for item in source.get_all_mod_list_items()
+            )
+            if (
+                source is self.active_list
+                and tuple(source.paths) != previous_order
+                and can_recalculate
+            ):
+                source.recalculate_warnings_signal.emit()
         self.changed.emit()
 
     def _save(self) -> None:

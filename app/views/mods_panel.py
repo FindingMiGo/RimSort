@@ -1169,6 +1169,7 @@ class ModListWidget(QListWidget):
     create_set_from_drop_signal = Signal(list, str)
     rename_collection_set_signal = Signal(str, str)
     delete_collection_set_signal = Signal(str)
+    set_collection_enabled_signal = Signal(str, bool)
 
     """
     Subclass for QListWidget. Used to store lists for
@@ -1834,6 +1835,10 @@ class ModListWidget(QListWidget):
             edit_mod_rules_action = None
             # Toggle warning action
             toggle_warning_action = None
+            set_key = item_data.__dict__.get("collection_set_key", "")
+            ungroup_set_action = (
+                QAction(self.tr("Ungroup set (keep mods)")) if set_key else None
+            )
             # Blacklist SteamDB options
             add_to_steamdb_blacklist_action = None
             remove_from_steamdb_blacklist_action = None
@@ -2208,6 +2213,9 @@ class ModListWidget(QListWidget):
                 context_menu.addAction(find_translation_action)
             if toggle_warning_action:
                 context_menu.addAction(toggle_warning_action)
+            if ungroup_set_action:
+                context_menu.addSeparator()
+                context_menu.addAction(ungroup_set_action)
 
             context_menu.addMenu(self.deletion_sub_menu)
             context_menu.addSeparator()
@@ -2277,6 +2285,9 @@ class ModListWidget(QListWidget):
             # Execute QMenu and return it's ACTION
             action = context_menu.exec_(self.mapToGlobal(pos_local))
             if action:  # Handle the action for all selected items
+                if action == ungroup_set_action:
+                    self.delete_collection_set_signal.emit(set_key)
+                    return True
                 if action == add_divider_action:
                     row = self.row(item)
                     name, ok = QInputDialog.getText(
@@ -2852,6 +2863,23 @@ class ModListWidget(QListWidget):
                 or key_pressed == "Return"
                 or key_pressed == "Space"
             ):
+                if key_pressed in ("Return", "Space"):
+                    set_keys = {
+                        item.data(Qt.ItemDataRole.UserRole).__dict__.get(
+                            "collection_set_key", ""
+                        )
+                        for item in self.selectedItems()
+                        if item.data(Qt.ItemDataRole.UserRole).__dict__.get(
+                            "collection_parent", False
+                        )
+                    }
+                    set_keys.discard("")
+                    if set_keys:
+                        for set_key in set_keys:
+                            self.set_collection_enabled_signal.emit(
+                                set_key, self.list_type != "Active"
+                            )
+                        return
                 self.key_press_signal.emit(key_pressed)
             else:
                 # Handle Delete key for mod deletion
@@ -3518,6 +3546,9 @@ class ModListWidget(QListWidget):
                     for path in group.members
                     if path in self.paths
                 ]
+                for member_item in member_items:
+                    member_data = member_item.data(Qt.ItemDataRole.UserRole)
+                    member_data.__dict__["collection_set_key"] = key
                 if len(member_items) < 2:
                     continue
                 insertion = min(self.row(item) for item in member_items)
@@ -3659,10 +3690,12 @@ class ModListWidget(QListWidget):
             self.toggle_divider_collapse(data.uuid)
             return
         if data.__dict__.get("collection_parent", False):
-            idx = self.row(item)
-            count = int(data.__dict__.get("collection_member_count", 0))
-            for row in range(idx + 1, min(self.count(), idx + 1 + count)):
-                self.item(row).setSelected(True)
+            set_key = data.__dict__.get("collection_set_key", "")
+            if set_key:
+                self.set_collection_enabled_signal.emit(
+                    set_key, self.list_type != "Active"
+                )
+                return
         self.key_press_signal.emit("DoubleClick")
 
     def rebuild_item_widget_from_uuid(self, uuid: str) -> None:

@@ -3637,6 +3637,10 @@ Alternative Dependencies:</source>
         <source>Reset mod colors</source>
         <translation>MODの色をリセット</translation>
     </message>
+    <message>
+        <source>Ungroup set (keep mods)</source>
+        <translation>セットを解除（MODは保持）</translation>
+    </message>
 </context>
 <context>
     <name>ModlistHistoryPanel</name>

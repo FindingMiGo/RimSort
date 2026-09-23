@@ -134,15 +134,11 @@ def test_drop_mod_onto_mod_creates_and_extends_set(
 
     source.clearSelection()
     parent.setSelected(True)
-    move = QSignalSpy(source.key_press_signal)
+    source.set_collection_enabled_signal.disconnect()
+    move = QSignalSpy(source.set_collection_enabled_signal)
     source.mod_double_clicked(parent)
     assert move.count() == 1
-    assert move.at(0) == ["DoubleClick"]
-    assert {
-        item.data(Qt.ItemDataRole.UserRole)["path"]
-        for item in source.selectedItems()
-        if not getattr(item.data(Qt.ItemDataRole.UserRole), "is_divider", False)
-    } == {paths[0], paths[1]}
+    assert move.at(0) == [key, True]
 
     source.clearSelection()
     items = controller.items(source)
@@ -155,6 +151,23 @@ def test_drop_requires_a_different_selected_mod(collections_panel: ModsPanel) ->
     source = collections_panel.inactive_mods_list
     source.item(0).setSelected(True)
     assert not source._request_set_from_drop(source.item(0))
+
+
+def test_double_clicking_representative_activates_whole_set(
+    collections_panel: ModsPanel,
+) -> None:
+    view, key, paths = grouped_view(collections_panel)
+    controller = view.controller
+    source = controller.inactive_list
+    parent = source.item(0)
+
+    source.mod_double_clicked(parent)
+    QApplication.processEvents()
+
+    assert controller.active_list.paths[:2] == controller.collections.members(
+        "set", key
+    )
+    assert set(controller.items(source)) == set(paths[2:])
 
 
 def test_drop_center_targets_mod_but_row_edges_reorder(
@@ -381,6 +394,31 @@ def test_group_operations_save_once_and_activation_does_not_save_settings(
     QApplication.processEvents()
     controller.refresh()
     save.assert_not_called()
+
+
+def test_split_set_is_rejoined_in_dependency_order(
+    collections_panel: ModsPanel,
+) -> None:
+    view, key, paths = grouped_view(collections_panel)
+    controller = view.controller
+    controller.set_enabled([paths[1]], True)
+    QApplication.processEvents()
+    active_child = controller.items(controller.active_list)[paths[1]]
+    inactive_parent = controller.items(controller.inactive_list)[paths[0]]
+    assert (
+        active_child.data(Qt.ItemDataRole.UserRole).__dict__["collection_set_key"]
+        == key
+    )
+    assert (
+        inactive_parent.data(Qt.ItemDataRole.UserRole).__dict__["collection_set_key"]
+        == key
+    )
+    controller.set_enabled([paths[0]], True)
+    QApplication.processEvents()
+
+    assert controller.active_list.paths[:2] == controller.collections.members(
+        "set", key
+    )
 
 
 def test_create_group_uses_real_list_selection_and_saves_once(
