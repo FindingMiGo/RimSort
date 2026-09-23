@@ -482,6 +482,37 @@ def test_set_rendering_keeps_load_order_warning_based_on_real_positions(
     assert load_after == {str(second.package_id)}
 
 
+def test_name_search_reveals_matching_child_through_representative(
+    collections_panel: ModsPanel,
+) -> None:
+    view, _key, paths = grouped_view(collections_panel)
+    controller = view.controller
+    source = controller.inactive_list
+    panel = collections_panel
+    panel.inactive_mods_search_filter.setCurrentText(panel.tr("Name"))
+
+    panel.signal_search_and_filters("Inactive", "Mod 1")
+
+    parent = controller.items(source)[paths[0]]
+    child = controller.items(source)[paths[1]]
+    assert not parent.isHidden()
+    assert child.isHidden()
+    parent_widget = source.itemWidget(parent)
+    assert isinstance(parent_widget, ModListItemInner)
+    assert not parent_widget.collection_children_widget.isHidden()
+    child_layout_item = parent_widget.collection_children_layout.itemAt(0)
+    assert child_layout_item is not None
+    child_label = child_layout_item.widget()
+    assert isinstance(child_label, QLabel)
+    assert controller.mod_name(paths[1]) in child_label.text()
+
+    panel.signal_search_and_filters("Inactive", "")
+
+    assert not parent.isHidden()
+    assert child.isHidden()
+    assert parent_widget.collection_children_widget.isHidden()
+
+
 def test_create_group_uses_real_list_selection_and_saves_once(
     collections_panel: ModsPanel,
 ) -> None:

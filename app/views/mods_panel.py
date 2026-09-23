@@ -3137,7 +3137,8 @@ class ModListWidget(QListWidget):
             if data.__dict__.get("collection_parent", False) and set_key:
                 widget.set_collection_parent(
                     set_key,
-                    bool(data.__dict__.get("collection_collapsed", True)),
+                    bool(data.__dict__.get("collection_collapsed", True))
+                    and not bool(data.__dict__.get("collection_search_paths", [])),
                     list(data.__dict__.get("collection_children", [])),
                 )
 
@@ -3569,6 +3570,7 @@ class ModListWidget(QListWidget):
                 data.__dict__["collection_member_count"] = 0
                 data.__dict__["collection_collapsed"] = False
                 data.__dict__["collection_children"] = []
+                data.__dict__["collection_search_paths"] = []
                 item.setHidden(False)
                 widget = self.itemWidget(item)
                 if isinstance(widget, ModListItemInner):
@@ -3662,6 +3664,16 @@ class ModListWidget(QListWidget):
             )
         }
         children: list[tuple[str, str]] = []
+        search_paths: set[str] = set()
+        for parent_item in self.get_all_mod_list_items():
+            parent_data = parent_item.data(Qt.ItemDataRole.UserRole)
+            if parent_data.__dict__.get("collection_parent", False) and (
+                parent_data.__dict__.get("collection_set_key", "") == key
+            ):
+                search_paths = set(
+                    parent_data.__dict__.get("collection_search_paths", [])
+                )
+                break
         for item in self.get_all_mod_list_items():
             data = item.data(Qt.ItemDataRole.UserRole)
             if not data.__dict__.get("collection_child", False):
@@ -3669,6 +3681,8 @@ class ModListWidget(QListWidget):
             if data.__dict__.get("collection_set_key", "") != key:
                 continue
             path = data["path"]
+            if search_paths and path not in search_paths:
+                continue
             mod = self.metadata_controller.get_mod(path)
             name = str(mod.name) if mod and mod.name else path
             marker = "❗ " if data["errors"] else "⚠ " if data["warnings"] else ""
@@ -3679,6 +3693,51 @@ class ModListWidget(QListWidget):
                 )
             )
         return children
+
+    def apply_collection_search(self, matching_paths: set[str], active: bool) -> None:
+        """Expose matching set children through their representative row."""
+        groups: dict[str, list[CustomListWidgetItem]] = {}
+        for item in self.get_all_mod_list_items():
+            data = item.data(Qt.ItemDataRole.UserRole)
+            key = data.__dict__.get("collection_set_key", "")
+            if key:
+                groups.setdefault(key, []).append(item)
+        for key, members in groups.items():
+            parent = next(
+                (
+                    item
+                    for item in members
+                    if item.data(Qt.ItemDataRole.UserRole).__dict__.get(
+                        "collection_parent", False
+                    )
+                ),
+                None,
+            )
+            if parent is None:
+                continue
+            parent_data = parent.data(Qt.ItemDataRole.UserRole)
+            child_matches = [
+                item.data(Qt.ItemDataRole.UserRole)["path"]
+                for item in members
+                if item.data(Qt.ItemDataRole.UserRole).__dict__.get(
+                    "collection_child", False
+                )
+                and item.data(Qt.ItemDataRole.UserRole)["path"] in matching_paths
+            ]
+            visible_child_matches = child_matches if active else []
+            parent_data.__dict__["collection_search_paths"] = visible_child_matches
+            if visible_child_matches:
+                parent_data["filtered"] = False
+                parent_data.__dict__["hidden_by_filter"] = False
+                parent.setHidden(False)
+            children = self._collection_child_summaries(key)
+            widget = self.itemWidget(parent)
+            if isinstance(widget, ModListItemInner):
+                collapsed = bool(parent_data.__dict__.get("collection_collapsed", True))
+                widget.set_collection_parent(
+                    key, collapsed and not visible_child_matches, children
+                )
+                parent.setSizeHint(widget.sizeHint())
 
     def refresh_collection_summaries(self) -> None:
         """Refresh expanded child labels after load-order warnings change."""
@@ -3695,7 +3754,8 @@ class ModListWidget(QListWidget):
             if isinstance(widget, ModListItemInner):
                 widget.set_collection_parent(
                     key,
-                    bool(data.__dict__.get("collection_collapsed", True)),
+                    bool(data.__dict__.get("collection_collapsed", True))
+                    and not bool(data.__dict__.get("collection_search_paths", [])),
                     children,
                 )
                 item.setSizeHint(widget.sizeHint())
@@ -5669,6 +5729,7 @@ class ModsPanel(QWidget):
         # Filter the list using any search and filter state
         num_filtered = 0
         num_unfiltered = 0
+        matching_paths: set[str] = set()
         # Ensure `matches` is defined even if we don't call `search_mod_notes`.
         matches: set[str] = set()
         if pattern.strip() and (
@@ -5811,6 +5872,8 @@ class ModsPanel(QWidget):
                     item_filtered = True
 
             # Check if the item should be filtered or hidden based on filter state
+            if not item_filtered:
+                matching_paths.add(uuid)
             if filter_state:
                 item.setHidden(item_filtered)
                 if item_filtered:
@@ -5831,11 +5894,18 @@ class ModsPanel(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, item_data)
 
         self.direct_update_count(list_type, num_filtered, num_unfiltered)
+        mod_list = (
+            self.active_mods_list if list_type == "Active" else self.inactive_mods_list
+        )
+        mod_list.apply_collection_search(
+            matching_paths, bool(filter_state and filters_active)
+        )
         if list_type == "Active":
             self.active_mods_list.check_widgets_visible()
             self.active_mods_list.apply_collapse_states()
         else:
             self.inactive_mods_list.check_widgets_visible()
+            self.inactive_mods_list.apply_collapse_states()
 
     def signal_search_mode_filter(self, list_type: str) -> None:
         if list_type == "Active":
