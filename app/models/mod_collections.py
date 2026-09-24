@@ -1,6 +1,5 @@
 """User-defined organization, independent of load order and dependencies."""
 
-from dataclasses import dataclass, field
 from uuid import uuid4
 
 import msgspec
@@ -125,19 +124,3 @@ class ModCollections(msgspec.Struct):
             label = f"{folder.name} / {group.name}" if folder else group.name
             result.update(dict.fromkeys(group.members, label))
         return result
-
-
-@dataclass(frozen=True)
-class ModCollectionsSnapshot:
-    """Paths only: list items may be destroyed before the next queued refresh."""
-
-    active: tuple[str, ...] = ()
-    inactive: tuple[str, ...] = ()
-    positions: dict[str, int] = field(init=False)
-    installed: frozenset[str] = field(init=False)
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "positions", {path: i + 1 for i, path in enumerate(self.active)}
-        )
-        object.__setattr__(self, "installed", frozenset((*self.active, *self.inactive)))

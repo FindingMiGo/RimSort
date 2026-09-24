@@ -125,7 +125,6 @@ from app.views.dialogue import (
 )
 from app.views.divider_widget import DividerItemInner
 from app.views.filter_panel import FilterButton
-from app.views.mod_collections_panel import ModCollectionsPanel
 
 _COLLECTION_CHILD_ROW_HEIGHT = 24
 
@@ -430,21 +429,35 @@ class ModListItemInner(QWidget):
 
     def set_collection_children(self, children: list[tuple[str, str]]) -> None:
         """Render display-only child rows without changing their load positions."""
-        while self.collection_children_layout.count():
-            layout_item = self.collection_children_layout.takeAt(0)
+        while self.collection_children_layout.count() > len(children):
+            layout_item = self.collection_children_layout.takeAt(
+                self.collection_children_layout.count() - 1
+            )
             if layout_item is None:
                 continue
             child = layout_item.widget()
             if child is not None:
                 child.setParent(None)
                 child.deleteLater()
-        for child_text, tooltip in children:
-            label = QLabel(f"↳ {child_text}")
-            label.setObjectName("ListItemLabel")
+        for index, (child_text, tooltip) in enumerate(children):
+            if index < self.collection_children_layout.count():
+                layout_item = self.collection_children_layout.itemAt(index)
+                label = layout_item.widget() if layout_item is not None else None
+                if not isinstance(label, QLabel):
+                    continue
+                label.setText(f"↳ {child_text}")
+            else:
+                label = QLabel(f"↳ {child_text}")
+                label.setObjectName("ListItemLabel")
+                label.setFixedHeight(_COLLECTION_CHILD_ROW_HEIGHT)
+                self.collection_children_layout.addWidget(label)
             label.setToolTip(tooltip)
-            label.setFixedHeight(_COLLECTION_CHILD_ROW_HEIGHT)
-            self.collection_children_layout.addWidget(label)
+        self.collection_children_widget.setFixedHeight(
+            len(children) * _COLLECTION_CHILD_ROW_HEIGHT
+        )
         self.collection_children_widget.setHidden(not children)
+        self.item_layout.invalidate()
+        self.updateGeometry()
 
     def clear_collection_group(self) -> None:
         """Restore the ordinary row appearance after leaving a set."""
@@ -1427,11 +1440,14 @@ class ModListWidget(QListWidget):
         if (
             source_widget == self
             and isinstance(target_item, CustomListWidgetItem)
-            and not target_item.isSelected()
             and self._drop_position_is_on_item(target_item, event.position().toPoint())
             and self._request_set_from_drop(target_item)
         ):
-            event.acceptProposedAction()
+            # Membership changes leave the load-order rows in place. Reporting
+            # MoveAction makes Qt's startDrag() delete the selected source rows
+            # after this handler returns. No model copy is performed here.
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
             return
 
         super().dropEvent(event)
@@ -1463,15 +1479,17 @@ class ModListWidget(QListWidget):
     def _drop_position_is_on_item(
         self, item: CustomListWidgetItem, position: Any
     ) -> bool:
-        """Treat the middle half of a row as dropping onto that mod.
+        """Treat a drop over the mod or its expanded children as grouping.
 
         QListWidget normally reports internal drops as above/below an item,
-        even when the pointer is visually over it.  Use the actual row
-        geometry so the center means grouping and the edges still mean
-        reordering.
+        even when the pointer is visually over it.  Keep the reorder margin
+        based on the representative's own line, not the expanded group's
+        total height, so its name remains a valid drop target.
         """
         rect = self.visualItemRect(item)
-        edge = max(2, rect.height() // 4)
+        data = item.data(Qt.ItemDataRole.UserRole)
+        base_height = int(getattr(data, "collection_base_height", rect.height()))
+        edge = max(2, min(rect.height(), base_height) // 4)
         return rect.adjusted(0, edge, 0, -edge).contains(position)
 
     def _request_set_from_drop(self, target_item: CustomListWidgetItem | None) -> bool:
@@ -3148,14 +3166,6 @@ class ModListWidget(QListWidget):
             self.setItemWidget(item, widget)
             if data.__dict__.get("collection_child", False):
                 widget.main_item_layout.setContentsMargins(24, 0, 0, 0)
-            set_key = data.__dict__.get("collection_set_key", "")
-            if data.__dict__.get("collection_parent", False) and set_key:
-                widget.set_collection_parent(
-                    set_key,
-                    bool(data.__dict__.get("collection_collapsed", True))
-                    and not bool(data.__dict__.get("collection_search_paths", [])),
-                    list(data.__dict__.get("collection_children", [])),
-                )
 
             # Apply translation status if enabled
             if self.show_translation_status:
@@ -3169,7 +3179,7 @@ class ModListWidget(QListWidget):
             # Ensure initial icon states reflect current item data
             widget.repolish(item)
             if data.__dict__.get("collection_parent", False):
-                self._sync_collection_row_height(item)
+                self._update_collection_row(item)
 
     def check_widgets_visible(self) -> None:
         """Queue missing visible row widgets without blocking the event loop.
@@ -3571,30 +3581,32 @@ class ModListWidget(QListWidget):
                 for row in range(self.count())
             ]
 
-            for item in self.get_all_mod_list_items():
-                data = item.data(Qt.ItemDataRole.UserRole)
-                if "collection_base_height" not in data.__dict__:
-                    data.__dict__["collection_base_height"] = max(
-                        self._lazy_mod_row_size.height(), item.sizeHint().height()
-                    )
-                data.__dict__["collection_child"] = False
-                data.__dict__["collection_parent"] = False
-                data.__dict__["collection_set_key"] = ""
-                data.__dict__["collection_member_count"] = 0
-                data.__dict__["collection_member_order"] = 0
-                data.__dict__["collection_collapsed"] = False
-                data.__dict__["collection_children"] = []
-                data.__dict__["collection_search_paths"] = []
-                item.setHidden(False)
-                widget = self.itemWidget(item)
-                if isinstance(widget, ModListItemInner):
-                    widget.clear_collection_group()
-                self._sync_collection_row_height(item)
-
             items_by_path = {
                 item.data(Qt.ItemDataRole.UserRole)["path"]: item
                 for item in self.get_all_mod_list_items()
             }
+            for item in items_by_path.values():
+                data = item.data(Qt.ItemDataRole.UserRole)
+                if "collection_base_height" not in data.__dict__:
+                    widget = self.itemWidget(item)
+                    natural_height = item.sizeHint().height()
+                    if isinstance(widget, ModListItemInner):
+                        natural_height = max(
+                            natural_height,
+                            widget.main_item_layout.sizeHint().height(),
+                        )
+                    data.__dict__["collection_base_height"] = max(
+                        self._lazy_mod_row_size.height(), natural_height
+                    )
+                data.__dict__["collection_child"] = False
+                data.__dict__["collection_parent"] = False
+                data.__dict__["collection_set_key"] = ""
+                data.__dict__["collection_member_order"] = 0
+                data.__dict__["collection_collapsed"] = False
+                data.__dict__["collection_children"] = []
+                data.__dict__["collection_search_expanded"] = False
+                item.setHidden(False)
+
             parents: list[tuple[str, CustomListWidgetItem]] = []
             for key, group in collections.sets.items():
                 member_items = [
@@ -3607,36 +3619,23 @@ class ModListWidget(QListWidget):
                     member_data.__dict__["collection_set_key"] = key
                 if len(member_items) < 2:
                     continue
-                representative_path = member_items[0].data(Qt.ItemDataRole.UserRole)[
-                    "path"
-                ]
                 collapsed = key not in self._expanded_collection_sets
                 for member_order, item in enumerate(member_items):
                     data = item.data(Qt.ItemDataRole.UserRole)
-                    is_parent = data["path"] == representative_path
+                    is_parent = member_order == 0
                     data.__dict__["collection_parent"] = is_parent
                     data.__dict__["collection_child"] = not is_parent
                     data.__dict__["collection_set_key"] = key
-                    data.__dict__["collection_member_count"] = len(member_items) - 1
                     data.__dict__["collection_member_order"] = member_order
                     data.__dict__["collection_collapsed"] = collapsed
                     item.setHidden(not is_parent)
-                for item in member_items:
-                    data = item.data(Qt.ItemDataRole.UserRole)
-                    is_parent = data["path"] == representative_path
-                    if is_parent:
-                        parents.append((key, item))
+                parents.append((key, member_items[0]))
             summaries = self._collection_summaries_by_key()
             for key, item in parents:
                 data = item.data(Qt.ItemDataRole.UserRole)
-                children = summaries.get(key, [])
-                data.__dict__["collection_children"] = children
-                widget = self.itemWidget(item)
-                if isinstance(widget, ModListItemInner):
-                    widget.set_collection_parent(
-                        key, bool(data.__dict__["collection_collapsed"]), children
-                    )
-                self._sync_collection_row_height(item)
+                data.__dict__["collection_children"] = summaries.get(key, [])
+            for item in items_by_path.values():
+                self._update_collection_row(item)
         finally:
             self.model().rowsInserted.connect(
                 self.handle_rows_inserted, Qt.ConnectionType.QueuedConnection
@@ -3664,21 +3663,8 @@ class ModListWidget(QListWidget):
                 self._expanded_collection_sets.discard(key)
             else:
                 self._expanded_collection_sets.add(key)
-            children = self._collection_child_summaries(key)
-            data.__dict__["collection_children"] = children
-            widget = self.itemWidget(item)
-            if isinstance(widget, ModListItemInner):
-                widget.set_collection_parent(key, collapsed, children)
-            self._sync_collection_row_height(item)
-            for child_row in range(self.count()):
-                child = self.item(child_row)
-                child_data = child.data(Qt.ItemDataRole.UserRole)
-                if not child_data.__dict__.get("collection_child", False):
-                    continue
-                if child_data.__dict__.get("collection_set_key", "") != key:
-                    continue
-                child_data.__dict__["collection_collapsed"] = collapsed
-                child.setHidden(True)
+            data.__dict__["collection_children"] = self._collection_child_summaries(key)
+            self._update_collection_row(item)
             if not collapsed:
                 self.check_widgets_visible()
             return
@@ -3689,29 +3675,13 @@ class ModListWidget(QListWidget):
 
     def _collection_summaries_by_key(self) -> dict[str, list[tuple[str, str]]]:
         """Summarize all sets in one pass over the authoritative Qt rows."""
-        items = self.get_all_mod_list_items()
-        search_paths_by_key: dict[str, set[str]] = {}
-        for item in items:
-            data = item.data(Qt.ItemDataRole.UserRole)
-            if data.__dict__.get("collection_parent", False):
-                key = data.__dict__.get("collection_set_key", "")
-                search_paths_by_key[key] = set(
-                    data.__dict__.get("collection_search_paths", [])
-                )
         ordered_summaries: dict[str, list[tuple[int, str, str]]] = {}
-        position = 0
-        for item in items:
+        for position, item in enumerate(self.get_all_mod_list_items(), start=1):
             data = item.data(Qt.ItemDataRole.UserRole)
-            if getattr(data, "is_divider", False):
-                continue
-            position += 1
             if not data.__dict__.get("collection_child", False):
                 continue
             key = data.__dict__.get("collection_set_key", "")
-            search_paths = search_paths_by_key.get(key, set())
             path = data["path"]
-            if search_paths and path not in search_paths:
-                continue
             mod = self.metadata_controller.get_mod(path)
             name = str(mod.name) if mod and mod.name else path
             marker = "❗ " if data["errors"] else "⚠ " if data["warnings"] else ""
@@ -3727,8 +3697,8 @@ class ModListWidget(QListWidget):
             for key, children in ordered_summaries.items()
         }
 
-    def _sync_collection_row_height(self, item: CustomListWidgetItem) -> None:
-        """Reserve the expanded height even before its row widget is created."""
+    def _update_collection_row(self, item: CustomListWidgetItem) -> None:
+        """Keep the row contents and reserved height in sync, including lazy rows."""
         data = item.data(Qt.ItemDataRole.UserRole)
         base_height = int(
             data.__dict__.get(
@@ -3739,17 +3709,30 @@ class ModListWidget(QListWidget):
             data.__dict__.get("collection_parent", False)
             and (
                 not data.__dict__.get("collection_collapsed", True)
-                or data.__dict__.get("collection_search_paths", [])
+                or data.__dict__.get("collection_search_expanded", False)
             )
         )
         children = data.__dict__.get("collection_children", []) if expanded else []
+        widget = self.itemWidget(item)
+        if isinstance(widget, ModListItemInner):
+            if data.__dict__.get("collection_parent", False):
+                widget.set_collection_parent(
+                    data.__dict__["collection_set_key"], not expanded, children
+                )
+            else:
+                widget.clear_collection_group()
         width = max(0, item.sizeHint().width())
-        item.setSizeHint(
-            QSize(width, base_height + len(children) * _COLLECTION_CHILD_ROW_HEIGHT)
-        )
+        size = QSize(width, base_height + len(children) * _COLLECTION_CHILD_ROW_HEIGHT)
+        if item.sizeHint() != size:
+            item.setSizeHint(size)
 
-    def apply_collection_search(self, matching_paths: set[str], active: bool) -> None:
-        """Expose matching set children through their representative row."""
+    def apply_collection_search(
+        self,
+        query_matching_paths: set[str],
+        summary_matching_paths: set[str],
+        active: bool,
+    ) -> None:
+        """Expose a set when its members satisfy the filters as one unit."""
         groups: dict[str, list[CustomListWidgetItem]] = {}
         for item in self.get_all_mod_list_items():
             data = item.data(Qt.ItemDataRole.UserRole)
@@ -3771,17 +3754,25 @@ class ModListWidget(QListWidget):
             if parent is None:
                 continue
             parent_data = parent.data(Qt.ItemDataRole.UserRole)
-            child_matches = [
-                item.data(Qt.ItemDataRole.UserRole)["path"]
-                for item in members
-                if item.data(Qt.ItemDataRole.UserRole).__dict__.get(
-                    "collection_child", False
-                )
-                and item.data(Qt.ItemDataRole.UserRole)["path"] in matching_paths
+            member_paths = [
+                item.data(Qt.ItemDataRole.UserRole)["path"] for item in members
             ]
-            visible_child_matches = child_matches if active else []
-            parent_data.__dict__["collection_search_paths"] = visible_child_matches
-            if visible_child_matches:
+            group_matches = any(
+                path in query_matching_paths for path in member_paths
+            ) and any(path in summary_matching_paths for path in member_paths)
+            parent_data.__dict__["collection_search_expanded"] = (
+                active
+                and group_matches
+                and any(
+                    item.data(Qt.ItemDataRole.UserRole).__dict__.get(
+                        "collection_child", False
+                    )
+                    and item.data(Qt.ItemDataRole.UserRole)["path"]
+                    in query_matching_paths
+                    for item in members
+                )
+            )
+            if group_matches:
                 parent_data["filtered"] = False
                 parent_data.__dict__["hidden_by_filter"] = False
                 parent.setHidden(False)
@@ -3789,16 +3780,8 @@ class ModListWidget(QListWidget):
         summaries = self._collection_summaries_by_key()
         for key, parent in parents:
             parent_data = parent.data(Qt.ItemDataRole.UserRole)
-            visible_child_matches = parent_data.__dict__["collection_search_paths"]
-            children = summaries.get(key, [])
-            parent_data.__dict__["collection_children"] = children
-            widget = self.itemWidget(parent)
-            if isinstance(widget, ModListItemInner):
-                collapsed = bool(parent_data.__dict__.get("collection_collapsed", True))
-                widget.set_collection_parent(
-                    key, collapsed and not visible_child_matches, children
-                )
-            self._sync_collection_row_height(parent)
+            parent_data.__dict__["collection_children"] = summaries.get(key, [])
+            self._update_collection_row(parent)
 
     def refresh_collection_summaries(self) -> None:
         """Refresh expanded child labels after load-order warnings change."""
@@ -3810,17 +3793,8 @@ class ModListWidget(QListWidget):
             key = data.__dict__.get("collection_set_key", "")
             if not key:
                 continue
-            children = summaries.get(key, [])
-            data.__dict__["collection_children"] = children
-            widget = self.itemWidget(item)
-            if isinstance(widget, ModListItemInner):
-                widget.set_collection_parent(
-                    key,
-                    bool(data.__dict__.get("collection_collapsed", True))
-                    and not bool(data.__dict__.get("collection_search_paths", [])),
-                    children,
-                )
-            self._sync_collection_row_height(item)
+            data.__dict__["collection_children"] = summaries.get(key, [])
+            self._update_collection_row(item)
 
     def restore_dividers(self, dividers: list[dict[str, Any]]) -> None:
         """Re-insert dividers at saved positions after a list rebuild."""
@@ -4932,32 +4906,16 @@ class ModsPanel(QWidget):
             self.inactive_mods_list,
             self,
         )
-        self.collections_panel = ModCollectionsPanel(controller, self)
-        self.collections_panel.hide()
+        self.collections_controller = controller
         controller.changed.connect(self._reapply_collection_filters)
 
     def _reapply_collection_filters(self) -> None:
-        """Restore search and summary visibility after collection rows are rebuilt."""
-        for list_type, search, mod_list, filter_button in (
-            (
-                "Active",
-                self.active_mods_search,
-                self.active_mods_list,
-                self.active_filter_button,
-            ),
-            (
-                "Inactive",
-                self.inactive_mods_search,
-                self.inactive_mods_list,
-                self.inactive_filter_button,
-            ),
+        """Apply each list's own filters, clearing state carried by moved rows."""
+        for list_type, search in (
+            ("Active", self.active_mods_search),
+            ("Inactive", self.inactive_mods_search),
         ):
-            if (
-                search.text()
-                or filter_button.filter_panel.filter_state.has_active_filters()
-                or mod_list.summary_filter
-            ):
-                self.signal_search_and_filters(list_type, search.text())
+            self.signal_search_and_filters(list_type, search.text())
 
     def initialize_active_mods_search_widgets(self) -> None:
         """Initialize widgets for active mods search layout."""
@@ -5617,9 +5575,9 @@ class ModsPanel(QWidget):
             return
         active_paths = set(self.active_mods_list.get_all_mod_paths())
         inactive_paths = set(self.inactive_mods_list.get_all_mod_paths())
-        set_key = self.collections_panel.controller.collections.set_for(uuid)
+        set_key = self.collections_controller.collections.set_for(uuid)
         set_members = (
-            self.collections_panel.controller.collections.members("set", set_key)
+            self.collections_controller.collections.members("set", set_key)
             if set_key
             else []
         )
@@ -5875,7 +5833,8 @@ class ModsPanel(QWidget):
         # Filter the list using any search and filter state
         num_filtered = 0
         num_unfiltered = 0
-        matching_paths: set[str] = set()
+        query_matching_paths: set[str] = set()
+        summary_matching_paths: set[str] = set()
         # Ensure `matches` is defined even if we don't call `search_mod_notes`.
         matches: set[str] = set()
         if pattern.strip() and (
@@ -6015,8 +5974,10 @@ class ModsPanel(QWidget):
             summary_matches = summary_filter is None or bool(
                 item_data.__dict__.get(summary_data_key, False)
             )
-            if not item_filtered and summary_matches:
-                matching_paths.add(uuid)
+            if not item_filtered:
+                query_matching_paths.add(uuid)
+            if summary_matches:
+                summary_matching_paths.add(uuid)
             hidden_by_filter = (filter_state and item_filtered) or not summary_matches
             item_data["hidden_by_filter"] = hidden_by_filter
             # A set child can reveal its representative without making that
@@ -6028,12 +5989,16 @@ class ModsPanel(QWidget):
             else:
                 num_unfiltered += 1
 
-            # Update item data
-            item_data["filtered"] = item_filtered and not filter_state
-            item.setData(Qt.ItemDataRole.UserRole, item_data)
+            # Only highlight changes require repolishing the row widget.
+            highlighted = item_filtered and not filter_state
+            if item_data["filtered"] != highlighted:
+                item_data["filtered"] = highlighted
+                item.setData(Qt.ItemDataRole.UserRole, item_data)
 
         self.direct_update_count(list_type, num_filtered, num_unfiltered)
-        mod_list.apply_collection_search(matching_paths, filters_active)
+        mod_list.apply_collection_search(
+            query_matching_paths, summary_matching_paths, filters_active
+        )
         if list_type == "Active":
             self.active_mods_list.check_widgets_visible()
             self.active_mods_list.apply_collapse_states()

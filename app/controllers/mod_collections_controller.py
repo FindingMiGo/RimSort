@@ -6,7 +6,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 
 from app.controllers.metadata_controller import MetadataController
-from app.models.mod_collections import ModCollections, ModCollectionsSnapshot
+from app.models.mod_collections import ModCollections
 from app.models.settings import Settings
 from app.utils.custom_list_widget_item import CustomListWidgetItem
 from app.utils.event_bus import EventBus
@@ -31,7 +31,6 @@ class ModCollectionsController(QObject):
         self.metadata = metadata
         self.active_list = active_list
         self.inactive_list = inactive_list
-        self.snapshot = ModCollectionsSnapshot()
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(self.refresh)
@@ -64,19 +63,6 @@ class ModCollectionsController(QObject):
             for item in source.get_all_mod_list_items()
         }
 
-    def selected_paths(self, include_active: bool) -> list[str]:
-        sources = (
-            (self.active_list, self.inactive_list)
-            if include_active
-            else (self.inactive_list,)
-        )
-        return [
-            item.data(Qt.ItemDataRole.UserRole)["path"]
-            for source in sources
-            for item in source.selectedItems()
-            if not getattr(item.data(Qt.ItemDataRole.UserRole), "is_divider", False)
-        ]
-
     def mod_name(self, path: str) -> str:
         mod = self.metadata.get_mod(path)
         return str(mod.name) if mod and mod.name else Path(path).name
@@ -86,9 +72,11 @@ class ModCollectionsController(QObject):
 
     def refresh(self) -> None:
         self.timer.stop()
-        available_paths = set(self.items(self.active_list)) | set(
-            self.items(self.inactive_list)
-        )
+        list_items = [
+            (source, self.items(source))
+            for source in (self.active_list, self.inactive_list)
+        ]
+        available_paths = {path for _, items in list_items for path in items}
         if self._repair_renamed_members(self.collections, available_paths):
             self.settings.save()
         set_members = {
@@ -99,12 +87,8 @@ class ModCollectionsController(QObject):
             for path, label in self.collections.labels().items()
             if path not in set_members
         }
-        paths = []
-        for source in (self.active_list, self.inactive_list):
-            items = self.items(source)
+        for source, items in list_items:
             source.update_collection_labels(labels, items)
-            paths.append(tuple(items))
-        self.snapshot = ModCollectionsSnapshot(*paths)
         for source in (self.active_list, self.inactive_list):
             source.apply_collection_sets(self.collections)
         self.changed.emit()

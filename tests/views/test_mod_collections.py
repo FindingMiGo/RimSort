@@ -1,14 +1,20 @@
 """Grouping uses the real mod-list signals without changing load order."""
 
+import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtTest import QSignalSpy
-from PySide6.QtWidgets import QApplication, QInputDialog, QLabel, QTreeWidgetItem
+from PySide6.QtCore import QPoint, QPointF, QSize, Qt, QTimer
+from PySide6.QtGui import QDrag, QFont
+from PySide6.QtTest import QSignalSpy, QTest
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QLabel,
+)
 from pytestqt.qtbot import QtBot
 
 from app.controllers.mod_collections_controller import ModCollectionsController
@@ -25,7 +31,6 @@ from app.sort.mod_sorting import ModsPanelSortKey
 from app.utils.custom_list_widget_item import CustomListWidgetItem
 from app.utils.custom_list_widget_item_metadata import CustomListWidgetItemMetadata
 from app.utils.event_bus import EventBus
-from app.views.mod_collections_panel import ModCollectionsPanel
 from app.views.mods_panel import ModListItemInner, ModListWidget, ModsPanel
 
 
@@ -86,12 +91,11 @@ def collections_panel(qtbot: QtBot, fresh_event_bus: None) -> Iterator[ModsPanel
     QApplication.processEvents()
 
 
-def grouped_view(panel: ModsPanel) -> tuple[ModCollectionsPanel, str, list[str]]:
-    view = panel.collections_panel
-    controller = view.controller
+def grouped_set(panel: ModsPanel) -> tuple[ModCollectionsController, str, list[str]]:
+    controller = panel.collections_controller
     paths = list(controller.items(controller.inactive_list))
     key = controller.create("set", "Translations", paths[:2], [])
-    return view, key, paths
+    return controller, key, paths
 
 
 def append_synthetic_mod(
@@ -106,10 +110,40 @@ def append_synthetic_mod(
         source.insertItem(index, item)
 
 
+def extend_synthetic_mods(panel: ModsPanel) -> None:
+    """Add enough members to exercise expanded rows beyond the old clipping limit."""
+    for row in range(4, 8):
+        path = f"/synthetic/mod-{row}"
+        panel.metadata_controller.mods_metadata[path] = AboutXmlMod(
+            name=f"Mod {row}: 日本語 translation and additional content",
+            package_id=CaseInsensitiveStr(f"example.mod{row}"),
+            _mod_path=Path(path),
+            _mod_type=ModType.LOCAL,
+        )
+        append_synthetic_mod(panel, path, False)
+
+
+def drop_on_representative(source: ModListWidget, parent: CustomListWidgetItem) -> None:
+    """Drop the current selection on the main row, not the expanded child area."""
+    rect = source.visualItemRect(parent)
+    base_height = parent.data(Qt.ItemDataRole.UserRole).__dict__.get(
+        "collection_base_height", rect.height()
+    )
+    position = rect.center()
+    position.setY(rect.top() + base_height // 2)
+    event = MagicMock()
+    event.source.return_value = source
+    event.position.return_value = QPointF(position)
+    source.dropEvent(event)
+    event.setDropAction.assert_called_once_with(Qt.DropAction.CopyAction)
+    event.accept.assert_called_once_with()
+    QApplication.processEvents()
+
+
 def activate_three(
     panel: ModsPanel,
 ) -> tuple[ModCollectionsController, list[str], ModListWidget]:
-    controller = panel.collections_panel.controller
+    controller = panel.collections_controller
     paths = list(controller.items(controller.inactive_list))[:3]
     controller.set_enabled(paths, True)
     QApplication.processEvents()
@@ -129,6 +163,149 @@ def child_labels(
         assert isinstance(label, QLabel)
         labels.append(label)
     return widget, labels
+
+
+def native_drag(
+    qtbot: QtBot,
+    source: ModListWidget,
+    source_item: CustomListWidgetItem,
+    target: ModListWidget,
+    target_position: QPoint,
+) -> None:
+    """Run Qt's native drag loop, including startDrag's source-row cleanup."""
+    timers: list[QTimer] = []
+
+    def schedule(delay: int, callback: Callable[[], None]) -> None:
+        timer = QTimer(source)
+        timer.setSingleShot(True)
+        timer.timeout.connect(callback)
+        timers.append(timer)
+        timer.start(delay)
+
+    try:
+        QTest.mousePress(
+            source.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=source.visualItemRect(source_item).center(),
+        )
+        schedule(100, lambda: QTest.mouseMove(target.viewport(), target_position))
+        schedule(
+            200,
+            lambda: QTest.mouseRelease(
+                target.viewport(), Qt.MouseButton.LeftButton, pos=target_position
+            ),
+        )
+        schedule(2000, QDrag.cancel)
+        source.startDrag(Qt.DropAction.MoveAction | Qt.DropAction.CopyAction)
+        qtbot.wait(100)
+    finally:
+        for timer in timers:
+            timer.stop()
+        QDrag.cancel()
+
+
+@pytest.mark.skipif(
+    os.environ.get("RIMSORT_NATIVE_DRAG_TESTS") != "1",
+    reason="Opt-in native Qt drag test; run with xcb under xvfb-run",
+)
+@pytest.mark.parametrize("list_type", ["Active", "Inactive"])
+@pytest.mark.parametrize("expanded", [False, True])
+def test_native_set_drop_preserves_all_load_order_rows(
+    collections_panel: ModsPanel, qtbot: QtBot, list_type: str, expanded: bool
+) -> None:
+    if QApplication.platformName() != "xcb":
+        pytest.skip("Requires the xcb drag event loop (offscreen does not support it)")
+    panel = collections_panel
+    extend_synthetic_mods(panel)
+    QApplication.processEvents()
+    controller = panel.collections_controller
+    paths = list(controller.items(controller.inactive_list))
+    source = controller.inactive_list
+    if list_type == "Active":
+        controller.set_enabled(paths, True)
+        source = controller.active_list
+    panel.resize(1200, 700)
+    panel.show()
+    qtbot.waitExposed(panel)
+    qtbot.wait(200)
+    original_paths = source.get_all_mod_paths()
+    parent = controller.items(source)[paths[0]]
+    base_height = parent.sizeHint().height()
+    drop = QSignalSpy(source.create_set_from_drop_signal)
+    removed = QSignalSpy(source.model().rowsRemoved)
+    key = ""
+    for index, path in enumerate(paths[1:], start=1):
+        rect = source.visualItemRect(parent)
+        position = rect.center()
+        position.setY(rect.top() + base_height // 2)
+        native_drag(qtbot, source, controller.items(source)[path], source, position)
+        assert drop.count() == index
+        assert source.get_all_mod_paths() == original_paths
+        assert removed.count() == 0
+        key = controller.collections.set_for(paths[0])
+        assert controller.collections.sets[key].members == paths[: index + 1]
+        if index == 1 and expanded:
+            source.toggle_collection_set(key)
+            QApplication.processEvents()
+        assert len(child_labels(source, parent)[1]) == (index if expanded else 0)
+
+    if not expanded:
+        source.toggle_collection_set(key)
+    QApplication.processEvents()
+    widget, labels = child_labels(source, parent)
+    assert len(labels) == 7
+    assert source.visualItemRect(parent).height() == base_height + 7 * 24
+    assert all(
+        label.mapTo(widget, label.rect().bottomLeft()).y() < widget.height()
+        for label in labels
+    )
+    source.toggle_collection_set(key)
+    QApplication.processEvents()
+    assert source.visualItemRect(parent).height() == base_height
+    source.toggle_collection_set(key)
+    QApplication.processEvents()
+    assert len(child_labels(source, parent)[1]) == 7
+    search = (
+        panel.active_mods_search
+        if list_type == "Active"
+        else panel.inactive_mods_search
+    )
+    search.setText("Mod 7")
+    QApplication.processEvents()
+    assert not parent.isHidden()
+    assert len(child_labels(source, parent)[1]) == 7
+    assert source.get_all_mod_paths() == original_paths
+
+
+@pytest.mark.skipif(
+    os.environ.get("RIMSORT_NATIVE_DRAG_TESTS") != "1",
+    reason="Opt-in native Qt drag test; run with xcb under xvfb-run",
+)
+def test_native_reorder_and_cross_list_drop_still_move_rows(
+    collections_panel: ModsPanel, qtbot: QtBot
+) -> None:
+    if QApplication.platformName() != "xcb":
+        pytest.skip("Requires the xcb drag event loop (offscreen does not support it)")
+    panel = collections_panel
+    controller, paths, active = activate_three(panel)
+    panel.resize(1200, 700)
+    panel.show()
+    qtbot.waitExposed(panel)
+    qtbot.wait(200)
+    first = controller.items(active)[paths[0]]
+    last = controller.items(active)[paths[-1]]
+    position = active.visualItemRect(last).bottomLeft() + QPoint(100, 10)
+    native_drag(qtbot, active, first, active, position)
+    assert active.get_all_mod_paths() == [*paths[1:], paths[0]]
+    assert not controller.collections.sets
+
+    inactive = controller.inactive_list
+    inactive_paths = inactive.get_all_mod_paths()
+    native_drag(qtbot, active, first, inactive, QPoint(100, 150))
+    assert active.get_all_mod_paths() == paths[1:]
+    assert inactive.get_all_mod_paths() == [*inactive_paths, paths[0]]
+    assert active.paths == active.get_all_mod_paths()
+    assert inactive.paths == inactive.get_all_mod_paths()
 
 
 @contextmanager
@@ -192,17 +369,11 @@ def test_renamed_member_does_not_steal_another_set_member() -> None:
     assert collections.sets[old_key].members == [old_path]
 
 
-def first_group(view: ModCollectionsPanel) -> QTreeWidgetItem:
-    node = view.tree.topLevelItem(0)
-    assert node is not None
-    return node
-
-
 def test_drop_mod_onto_mod_creates_and_extends_set(
     collections_panel: ModsPanel,
 ) -> None:
     source = collections_panel.inactive_mods_list
-    controller = collections_panel.collections_panel.controller
+    controller = collections_panel.collections_controller
     paths = list(controller.items(source))
     original_order = list(source.paths)
 
@@ -286,17 +457,30 @@ def test_adding_to_expanded_set_keeps_all_child_rows_visible(
 ) -> None:
     panel = collections_panel
     panel.show()
-    view, key, paths = grouped_view(panel)
-    source = view.controller.inactive_list
+    controller, key, paths = grouped_set(panel)
+    source = controller.inactive_list
     source.toggle_collection_set(key)
     QApplication.processEvents()
+    parent = controller.items(source)[paths[0]]
+    original_widget, original_labels = child_labels(source, parent)
+    expanded_height = parent.sizeHint().height()
 
-    view.controller.assign([paths[2]], "set", key)
+    controller.refresh()
+    QApplication.processEvents()
+    refreshed_widget, refreshed_labels = child_labels(source, parent)
+    assert refreshed_widget is original_widget
+    assert refreshed_labels == original_labels
+    assert parent.sizeHint().height() == expanded_height
+
+    controller.assign([paths[2]], "set", key)
     QApplication.processEvents()
 
-    parent = view.controller.items(source)[paths[0]]
+    parent = controller.items(source)[paths[0]]
     widget, labels = child_labels(source, parent)
+    assert widget is original_widget
+    assert labels[0] is original_labels[0]
     assert len(labels) == 2
+    assert parent.sizeHint().height() == expanded_height + 24
     last_label = labels[-1]
     assert (
         last_label.mapTo(widget, last_label.rect().bottomLeft()).y() < widget.height()
@@ -308,8 +492,7 @@ def test_adding_inactive_mod_to_active_set_shows_second_child(
 ) -> None:
     panel = collections_panel
     panel.show()
-    view, key, paths = grouped_view(panel)
-    controller = view.controller
+    controller, key, paths = grouped_set(panel)
     controller.set_enabled(paths[:2], True)
     QApplication.processEvents()
     active = controller.active_list
@@ -334,8 +517,7 @@ def test_adding_inactive_mod_to_active_set_shows_second_child(
 def test_adding_active_mod_to_inactive_set_disables_it(
     collections_panel: ModsPanel,
 ) -> None:
-    view, key, paths = grouped_view(collections_panel)
-    controller = view.controller
+    controller, key, paths = grouped_set(collections_panel)
     controller.set_enabled([paths[2]], True)
     QApplication.processEvents()
 
@@ -405,8 +587,173 @@ def test_second_active_drop_keeps_previously_selected_child_first(
     assert labels[1].mapTo(widget, labels[1].rect().bottomLeft()).y() < widget.height()
 
 
+def test_eight_member_active_set_keeps_every_child_visible(
+    collections_panel: ModsPanel,
+) -> None:
+    panel = collections_panel
+    panel.show()
+    extend_synthetic_mods(panel)
+    QApplication.processEvents()
+    controller = panel.collections_controller
+    paths = list(controller.items(controller.inactive_list))
+    controller.set_enabled(paths, True)
+    QApplication.processEvents()
+    active = panel.active_mods_list
+    representative = controller.items(active)[paths[0]]
+    key = ""
+    for index, path in enumerate(paths[1:], start=1):
+        active.clearSelection()
+        controller.items(active)[path].setSelected(True)
+        representative.setSelected(True)
+        active.scrollToItem(representative)
+        QApplication.processEvents()
+        drop_on_representative(active, representative)
+        if not key:
+            key = controller.collections.set_for(paths[0])
+            active.toggle_collection_set(key)
+            QApplication.processEvents()
+        assert controller.collections.sets[key].members == paths[: index + 1]
+        parent = controller.items(active)[paths[0]]
+        widget, labels = child_labels(active, parent)
+        assert len(labels) == index
+        for member_path, label in zip(paths[1 : index + 1], labels):
+            assert controller.mod_name(member_path) in label.text()
+            assert label.mapTo(widget, label.rect().bottomLeft()).y() < widget.height()
+
+    # Filtering on a single member must not remove the other members from an
+    # expanded set.  They have no independent visible rows to search for.
+    panel.active_mods_search.setText("Mod 7")
+    QApplication.processEvents()
+    parent = controller.items(active)[paths[0]]
+    assert not parent.isHidden()
+    widget, labels = child_labels(active, parent)
+    assert len(labels) == 7
+    assert all(
+        controller.mod_name(path) in label.text()
+        for path, label in zip(paths[1:], labels)
+    )
+
+    panel.active_mods_search.setText("Mod 1")
+    QApplication.processEvents()
+    widget, labels = child_labels(active, parent)
+    assert len(labels) == 7
+    assert controller.mod_name(paths[1]) in labels[0].text()
+
+
+def test_expanded_active_set_with_rimpy_font_and_long_list_has_visible_rows(
+    collections_panel: ModsPanel,
+    qtbot: QtBot,
+) -> None:
+    panel = collections_panel
+    panel.resize(1500, 850)
+    panel.setFont(QFont("Yu Gothic UI", 12))
+    stylesheet = Path("themes/RimPy/style.qss").read_text(encoding="utf-8")
+    panel.setStyleSheet(stylesheet)
+    panel.show()
+    metadata = panel.metadata_controller
+    extend_synthetic_mods(panel)
+    for row in range(397):
+        path = f"/synthetic/background-{row}"
+        metadata.mods_metadata[path] = AboutXmlMod(
+            name=f"Background Mod {row}",
+            package_id=CaseInsensitiveStr(f"example.background{row}"),
+            _mod_path=Path(path),
+            _mod_type=ModType.LOCAL,
+        )
+        append_synthetic_mod(panel, path, True)
+    QApplication.processEvents()
+    controller = panel.collections_controller
+    paths = [f"/synthetic/mod-{row}" for row in range(8)]
+    controller.set_enabled(paths, True)
+    QApplication.processEvents()
+    active = panel.active_mods_list
+    parent = controller.items(active)[paths[0]]
+    active.scrollToItem(parent)
+    active.check_widgets_visible()
+    qtbot.waitUntil(
+        lambda: isinstance(active.itemWidget(parent), ModListItemInner), timeout=2000
+    )
+    key = ""
+    base_height = parent.sizeHint().height()
+    for index, path in enumerate(paths[1:], start=1):
+        active.clearSelection()
+        controller.items(active)[path].setSelected(True)
+        parent.setSelected(True)
+        QApplication.processEvents()
+        drop_on_representative(active, parent)
+        if not key:
+            key = controller.collections.set_for(paths[0])
+            active.toggle_collection_set(key)
+        widget, labels = child_labels(active, parent)
+        assert len(labels) == index
+        assert widget.collection_children_widget.height() == index * 24
+        row_rect = active.visualItemRect(parent)
+        assert row_rect.height() >= widget.height()
+        assert row_rect.height() >= widget.sizeHint().height()
+        assert row_rect.height() == base_height + index * 24
+        for member_path, label in zip(paths[1 : index + 1], labels):
+            assert controller.mod_name(member_path) in label.text()
+            assert label.mapTo(widget, label.rect().bottomLeft()).y() < widget.height()
+
+    # Re-rendering after an add must not leave the expanded height cached
+    # when the set is collapsed, nor lose any children on the next opening.
+    active.toggle_collection_set(key)
+    QApplication.processEvents()
+    assert active.visualItemRect(parent).height() == base_height
+    active.toggle_collection_set(key)
+    QApplication.processEvents()
+    widget, labels = child_labels(active, parent)
+    assert len(labels) == 7
+    assert widget.collection_children_widget.height() == 7 * 24
+    assert active.visualItemRect(parent).height() == base_height + 7 * 24
+
+
+def test_opening_set_without_search_does_not_scroll_representative_to_top(
+    collections_panel: ModsPanel,
+    qtbot: QtBot,
+) -> None:
+    panel = collections_panel
+    panel.resize(1500, 850)
+    panel.show()
+    metadata = panel.metadata_controller
+    for row in range(100):
+        path = f"/synthetic/background-{row}"
+        metadata.mods_metadata[path] = AboutXmlMod(
+            name=f"Background Mod {row}",
+            package_id=CaseInsensitiveStr(f"example.background{row}"),
+            _mod_path=Path(path),
+            _mod_type=ModType.LOCAL,
+        )
+        append_synthetic_mod(panel, path, True, row if row < 50 else None)
+    QApplication.processEvents()
+    controller = panel.collections_controller
+    paths = [f"/synthetic/mod-{row}" for row in range(3)]
+    controller.set_enabled(paths, True)
+    QApplication.processEvents()
+    active = panel.active_mods_list
+    key = controller.create("set", "Representative", paths, [])
+    parent = controller.items(active)[paths[0]]
+    active.scrollToItem(parent, QAbstractItemView.ScrollHint.PositionAtCenter)
+    active.check_widgets_visible()
+    qtbot.waitUntil(
+        lambda: isinstance(active.itemWidget(parent), ModListItemInner), timeout=2000
+    )
+    QApplication.processEvents()
+    before = active.verticalScrollBar().value()
+    assert before > 0
+    assert active.visualItemRect(parent).top() > 0
+
+    active.toggle_collection_set(key)
+    QApplication.processEvents()
+
+    assert active.verticalScrollBar().value() == before
+    assert active.visualItemRect(parent).top() > 0
+    assert len(child_labels(active, parent)[1]) == 2
+
+
 def test_active_set_survives_representative_deletion_and_recreation(
     collections_panel: ModsPanel,
+    qtbot: QtBot,
 ) -> None:
     panel = collections_panel
     controller, paths, active = activate_three(panel)
@@ -420,7 +767,9 @@ def test_active_set_survives_representative_deletion_and_recreation(
     panel.on_mod_deleted(paths[0])
     QApplication.processEvents()
     fallback = controller.items(active)[paths[1]]
-    assert fallback.data(Qt.ItemDataRole.UserRole).__dict__["collection_parent"]
+    qtbot.waitUntil(
+        lambda: fallback.data(Qt.ItemDataRole.UserRole).__dict__["collection_parent"]
+    )
     assert controller.items(active)[paths[2]].isHidden()
 
     with mock_mod_creation(panel) as (append_active, append_inactive):
@@ -471,7 +820,7 @@ def test_recreated_child_follows_set_disabled_while_it_was_missing(
 def test_expanding_unloaded_set_reserves_child_rows(
     collections_panel: ModsPanel,
 ) -> None:
-    controller = collections_panel.collections_panel.controller
+    controller = collections_panel.collections_controller
     source = controller.inactive_list
     paths = list(controller.items(source))
     key = controller.create("set", "Translations", paths[:3], [])
@@ -495,8 +844,7 @@ def test_expanding_unloaded_set_reserves_child_rows(
 def test_deleting_set_clears_parent_toggle_and_child_indent(
     collections_panel: ModsPanel,
 ) -> None:
-    view, key, paths = grouped_view(collections_panel)
-    controller = view.controller
+    controller, key, paths = grouped_set(collections_panel)
     source = controller.inactive_list
     source.toggle_collection_set(key)
     QApplication.processEvents()
@@ -520,8 +868,7 @@ def test_deleting_set_clears_parent_toggle_and_child_indent(
 def test_double_clicking_representative_activates_whole_set(
     collections_panel: ModsPanel,
 ) -> None:
-    view, key, paths = grouped_view(collections_panel)
-    controller = view.controller
+    controller, key, paths = grouped_set(collections_panel)
     source = controller.inactive_list
     parent = source.item(0)
 
@@ -545,11 +892,46 @@ def test_drop_center_targets_mod_but_row_edges_reorder(
     assert not source._drop_position_is_on_item(item, rect.bottomLeft())
 
 
-def test_batch_activation_preserves_order_and_tree_membership(
+def test_drop_on_expanded_representative_adds_member(
     collections_panel: ModsPanel,
 ) -> None:
-    view = collections_panel.collections_panel
-    controller = view.controller
+    panel = collections_panel
+    panel.show()
+    controller = panel.collections_controller
+    paths = list(controller.items(controller.inactive_list))
+    controller.set_enabled(paths, True)
+    QApplication.processEvents()
+    source = controller.active_list
+    key = controller.create("set", "Translations", paths[:3], [])
+    source.toggle_collection_set(key)
+    QApplication.processEvents()
+    parent = controller.items(source)[paths[0]]
+    newcomer = controller.items(source)[paths[3]]
+    rect = source.visualItemRect(parent)
+    base_height = parent.data(Qt.ItemDataRole.UserRole).__dict__[
+        "collection_base_height"
+    ]
+    position = rect.center()
+    position.setY(rect.top() + base_height // 2)
+    assert source._drop_position_is_on_item(parent, position)
+
+    newcomer.setSelected(True)
+    parent.setSelected(True)
+    event = MagicMock()
+    event.source.return_value = source
+    event.position.return_value = QPointF(position)
+    source.dropEvent(event)
+    QApplication.processEvents()
+
+    assert controller.collections.sets[key].members == paths
+    event.setDropAction.assert_called_once_with(Qt.DropAction.CopyAction)
+    event.accept.assert_called_once_with()
+
+
+def test_batch_activation_preserves_order_and_set_membership(
+    collections_panel: ModsPanel,
+) -> None:
+    controller = collections_panel.collections_controller
     paths = list(controller.items(controller.inactive_list))
     group = controller.collections.create("set", "Translations")
     folder = controller.collections.create("folder", "Series")
@@ -564,26 +946,14 @@ def test_batch_activation_preserves_order_and_tree_membership(
     assert set(controller.items(controller.active_list)) == set(before + paths[1:3])
     assert collections_panel.active_mods_label.text() == "Active [4]"
     assert collections_panel.inactive_mods_label.text() == "Inactive [0]"
-    view.mode.setCurrentIndex(1)
-    node = first_group(view)
-    assert node.text(0) == "Series"
-    assert node.text(1) == "3/3"
-    set_node = node.child(0)
-    assert set_node is not None
-    assert set_node.text(0) == "Translations"
-    member = set_node.child(1)
-    assert member is not None
-    assert member.text(2) == "#3"
-    # An individual checkbox changes only that member.
-    member.setCheckState(0, Qt.CheckState.Unchecked)
+    assert controller.active_list._collection_child_summaries(group)[0][0] == (
+        f"#3 {controller.mod_name(paths[1])}"
+    )
+    controller.set_enabled([paths[1]], False)
     QApplication.processEvents()
     assert paths[0] in controller.items(controller.active_list)
     assert paths[1] not in controller.items(controller.active_list)
     assert controller.collections.sets[group].members == paths[:2]
-    view.active_only.setChecked(True)
-    view.search.setText("Translations")
-    QApplication.processEvents()
-    # Filtering does not restrict a folder's batch operation.
     controller.set_enabled(controller.collections.members("folder", folder), False)
     QApplication.processEvents()
     assert list(controller.items(controller.active_list)) == [paths[3]]
@@ -593,25 +963,71 @@ def test_batch_activation_preserves_order_and_tree_membership(
     assert collections_panel.inactive_mods_label.text() == "Inactive [3]"
 
 
+@pytest.mark.parametrize("enable", [False, True])
+@pytest.mark.parametrize("highlight", [False, True])
+@pytest.mark.parametrize("grouped", [False, True])
+@pytest.mark.parametrize("target_search", ["", "Mod 1"])
+def test_move_replaces_source_filter_state(
+    collections_panel: ModsPanel,
+    enable: bool,
+    highlight: bool,
+    grouped: bool,
+    target_search: str,
+) -> None:
+    panel = collections_panel
+    controller = panel.collections_controller
+    paths = list(controller.items(controller.inactive_list))
+    if not enable:
+        controller.set_enabled(paths, True)
+        QApplication.processEvents()
+    source = controller.inactive_list if enable else controller.active_list
+    target = controller.active_list if enable else controller.inactive_list
+    source_type = source.list_type
+    source_search = panel.inactive_mods_search if enable else panel.active_mods_search
+    target_search_widget = (
+        panel.active_mods_search if enable else panel.inactive_mods_search
+    )
+    target_label = panel.active_mods_label if enable else panel.inactive_mods_label
+    if grouped:
+        controller.create("set", "Pair", paths[:2], [])
+    if highlight:
+        panel.signal_search_mode_filter(source_type)
+    source_search.setText("Mod 0")
+    target_search_widget.setText(target_search)
+    moving = controller.items(source)[paths[1]]
+    data = moving.data(Qt.ItemDataRole.UserRole)
+    assert data["filtered"] or data.__dict__["counted_as_filtered"]
+
+    controller.set_enabled(paths[:2], enable)
+    QApplication.processEvents()
+
+    for item in controller.items(target).values():
+        data = item.data(Qt.ItemDataRole.UserRole)
+        filtered = bool(target_search) and data["path"] != paths[1]
+        assert not data["filtered"]
+        assert data.__dict__["hidden_by_filter"] == (filtered and not grouped)
+        assert data.__dict__["counted_as_filtered"] == filtered
+        assert item.isHidden() == (
+            data.__dict__.get("collection_child", False) or (filtered and not grouped)
+        )
+    count = "1/2" if target_search else "2"
+    assert target_label.text() == f"{target.list_type} [{count}]"
+    assert controller.items(source).keys() == dict.fromkeys(paths[2:]).keys()
+
+
 def test_missing_members_and_organization_do_not_change_order(
     collections_panel: ModsPanel,
 ) -> None:
-    view = collections_panel.collections_panel
-    controller = view.controller
+    controller = collections_panel.collections_controller
     source = controller.inactive_list
     original = list(controller.items(source))
     key = controller.collections.create("set", "Optional")
     controller.assign([original[0], "/missing"], "set", key)
     assert list(controller.items(source)) == original
-    view.mode.setCurrentIndex(1)
     controller.set_enabled(controller.collections.members("set", key), True)
     QApplication.processEvents()
-    node = first_group(view)
-    assert node.text(1) == "1/2"
-    missing = node.child(1)
-    assert missing is not None
-    assert missing.text(1) == "Not installed"
-    assert not missing.flags() & Qt.ItemFlag.ItemIsUserCheckable
+    assert controller.collections.members("set", key) == [original[0], "/missing"]
+    assert list(controller.items(controller.active_list)) == original[:1]
     controller.delete("set", key)
     assert list(controller.items(controller.active_list)) == original[:1]
     assert list(controller.items(source)) == original[1:]
@@ -620,8 +1036,7 @@ def test_missing_members_and_organization_do_not_change_order(
 def test_reordering_and_instance_switch_preserve_separate_groups(
     collections_panel: ModsPanel,
 ) -> None:
-    view, key, paths = grouped_view(collections_panel)
-    controller = view.controller
+    controller, key, paths = grouped_set(collections_panel)
     controller.set_enabled(paths, True)
     QApplication.processEvents()
     active = controller.active_list
@@ -630,11 +1045,10 @@ def test_reordering_and_instance_switch_preserve_separate_groups(
     active.takeItem(0)
     active.addItem(item)
     QApplication.processEvents()
-    view.mode.setCurrentIndex(1)
-    node = first_group(view)
-    member = node.child(0)
-    assert member is not None
-    assert member.text(2) == "#4"
+    assert list(controller.items(active)) == paths[1:] + paths[:1]
+    assert active._collection_child_summaries(key)[0][0] == (
+        f"#1 {controller.mod_name(paths[1])}"
+    )
     assert controller.collections.sets[key].members == paths[:2]
     previous = controller.settings.current_instance
     controller.settings.instances["another"] = Instance()
@@ -652,87 +1066,20 @@ def test_reordering_and_instance_switch_preserve_separate_groups(
 
 
 def test_empty_set_can_move_between_folders(collections_panel: ModsPanel) -> None:
-    view = collections_panel.collections_panel
-    controller = view.controller
+    controller = collections_panel.collections_controller
     key = controller.collections.create("set", "Empty")
     folder = controller.collections.create("folder", "Folder")
     controller.move_set(key, folder)
-    view.mode.setCurrentIndex(1)
-    node = first_group(view)
-    child = node.child(0)
-    assert child is not None
-    assert child.text(0) == "Empty"
-    assert child.text(1) == "0/0"
+    assert controller.collections.sets[key].folder == folder
+    assert controller.collections.members("folder", folder) == []
     controller.move_set(key, "")
-    assert view.tree.topLevelItemCount() == 3
-
-
-def test_search_filters_existing_nodes_without_reloading_metadata(
-    collections_panel: ModsPanel,
-    qtbot: QtBot,
-) -> None:
-    view, _key, paths = grouped_view(collections_panel)
-    controller = view.controller
-    controller.set_enabled(paths[:1], True)
-    QApplication.processEvents()
-    view.mode.setCurrentIndex(1)
-    node = first_group(view)
-    member = node.child(1)
-    assert member is not None
-    node.setSelected(True)
-    controller.refresh()
-    node = first_group(view)
-    member = node.child(1)
-    assert member is not None
-    metadata = collections_panel.metadata_controller
-    get_mod = metadata.get_mod
-    assert isinstance(get_mod, MagicMock)
-    qtbot.waitUntil(
-        lambda: (
-            not collections_panel.active_mods_list._visible_widget_queue
-            and not collections_panel.inactive_mods_list._visible_widget_queue
-        ),
-        timeout=1000,
-    )
-    get_mod.reset_mock()
-    view.search.setText("translations")
-    view.active_only.setChecked(True)
-    QApplication.processEvents()
-    assert view.tree.topLevelItem(0) is node
-    assert node.child(1) is member
-    assert node.isSelected()
-    assert member.isHidden()
-    assert node.text(1) == "1/2"
-    get_mod.assert_not_called()
-    view.search.clear()
-    view.active_only.setChecked(False)
-    QApplication.processEvents()
-    assert view.tree.topLevelItem(0) is node
-    assert not member.isHidden()
-    assert node.isSelected()
-
-
-def test_refresh_preserves_tree_selection_and_collapsed_groups(
-    collections_panel: ModsPanel,
-) -> None:
-    view, key, _paths = grouped_view(collections_panel)
-    controller = view.controller
-    view.mode.setCurrentIndex(1)
-    node = first_group(view)
-    node.setExpanded(False)
-    node.setSelected(True)
-    controller.refresh()
-    refreshed = view.tree.topLevelItem(0)
-    assert refreshed is not None
-    assert not refreshed.isExpanded()
-    assert refreshed.isSelected()
-    assert refreshed.data(0, Qt.ItemDataRole.UserRole) == ("set", key)
+    assert controller.collections.sets[key].folder == ""
 
 
 def test_group_operations_save_once_and_activation_does_not_save_settings(
     collections_panel: ModsPanel,
 ) -> None:
-    controller = collections_panel.collections_panel.controller
+    controller = collections_panel.collections_controller
     save = controller.settings.save
     assert isinstance(save, MagicMock)
     paths = list(controller.items(controller.inactive_list))
@@ -763,8 +1110,7 @@ def test_group_operations_save_once_and_activation_does_not_save_settings(
 def test_split_set_preserves_independent_activation_order(
     collections_panel: ModsPanel,
 ) -> None:
-    view, key, paths = grouped_view(collections_panel)
-    controller = view.controller
+    controller, key, paths = grouped_set(collections_panel)
     controller.set_enabled([paths[1]], True)
     QApplication.processEvents()
     active_child = controller.items(controller.active_list)[paths[1]]
@@ -787,7 +1133,7 @@ def test_split_set_preserves_independent_activation_order(
 def test_set_rendering_keeps_load_order_warning_based_on_real_positions(
     collections_panel: ModsPanel,
 ) -> None:
-    controller = collections_panel.collections_panel.controller
+    controller = collections_panel.collections_controller
     source = controller.inactive_list
     paths = list(source.paths)
     first = controller.metadata.mods_metadata[paths[0]]
@@ -812,8 +1158,7 @@ def test_set_rendering_keeps_load_order_warning_based_on_real_positions(
 def test_name_search_reveals_matching_child_through_representative(
     collections_panel: ModsPanel,
 ) -> None:
-    view, _key, paths = grouped_view(collections_panel)
-    controller = view.controller
+    controller, _key, paths = grouped_set(collections_panel)
     source = controller.inactive_list
     panel = collections_panel
     panel.inactive_mods_search_filter.setCurrentText(panel.tr("Name"))
@@ -844,9 +1189,9 @@ def test_search_survives_set_creation(collections_panel: ModsPanel) -> None:
     panel = collections_panel
     panel.inactive_mods_search_filter.setCurrentText(panel.tr("Name"))
     panel.inactive_mods_search.setText("Mod 1")
-    view, _key, paths = grouped_view(panel)
-    source = view.controller.inactive_list
-    parent = view.controller.items(source)[paths[0]]
+    controller, _key, paths = grouped_set(panel)
+    source = controller.inactive_list
+    parent = controller.items(source)[paths[0]]
     widget = source.itemWidget(parent)
 
     assert not parent.isHidden()
@@ -856,21 +1201,21 @@ def test_search_survives_set_creation(collections_panel: ModsPanel) -> None:
     assert child_layout_item is not None
     child_label = child_layout_item.widget()
     assert isinstance(child_label, QLabel)
-    assert view.controller.mod_name(paths[1]) in child_label.text()
+    assert controller.mod_name(paths[1]) in child_label.text()
 
 
 def test_highlight_search_exposes_matching_set_child(
     collections_panel: ModsPanel,
 ) -> None:
     panel = collections_panel
-    view, _key, paths = grouped_view(panel)
+    controller, _key, paths = grouped_set(panel)
     panel.inactive_mods_search_filter_state = False
     panel.inactive_mods_search_filter.setCurrentText(panel.tr("Name"))
 
     panel.signal_search_and_filters("Inactive", "Mod 1")
 
-    parent = view.controller.items(view.controller.inactive_list)[paths[0]]
-    widget = view.controller.inactive_list.itemWidget(parent)
+    parent = controller.items(controller.inactive_list)[paths[0]]
+    widget = controller.inactive_list.itemWidget(parent)
     assert not parent.isHidden()
     assert isinstance(widget, ModListItemInner)
     assert widget.collection_children_layout.count() == 1
@@ -880,7 +1225,7 @@ def test_count_does_not_treat_set_children_as_filtered(
     collections_panel: ModsPanel,
 ) -> None:
     panel = collections_panel
-    grouped_view(panel)
+    grouped_set(panel)
 
     panel.update_count("Inactive")
 
@@ -891,19 +1236,19 @@ def test_error_filter_reveals_set_child_and_survives_search_change(
     collections_panel: ModsPanel,
 ) -> None:
     panel = collections_panel
-    view, _key, paths = grouped_view(panel)
-    view.controller.set_enabled(paths[:2], True)
+    controller, _key, paths = grouped_set(panel)
+    controller.set_enabled(paths[:2], True)
     QApplication.processEvents()
     source = panel.active_mods_list
-    items = view.controller.items(source)
+    items = controller.items(source)
     child_data = items[paths[1]].data(Qt.ItemDataRole.UserRole)
     child_data["errors"] = "Dependency error"
     child_data["errors_warnings"] = "Dependency error"
-    controller = ModsPanelController(panel, panel.settings)
+    panel_controller = ModsPanelController(panel, panel.settings)
     panel.errors_text.clicked.emit()
 
     parent = items[paths[0]]
-    assert controller.errors_label_active
+    assert panel_controller.errors_label_active
     assert source.summary_filter == "errors"
     assert not parent.isHidden()
     widget = source.itemWidget(parent)
@@ -913,10 +1258,43 @@ def test_error_filter_reveals_set_child_and_survives_search_change(
     assert panel.active_mods_label.text().endswith("[1/2]")
 
     panel.active_mods_search.setText("Mod 1")
-    assert controller.errors_label_active
+    assert panel_controller.errors_label_active
     assert not parent.isHidden()
     panel.errors_text.clicked.emit()
     assert source.summary_filter is None
+
+
+def test_error_filter_keeps_every_member_of_matching_active_set(
+    collections_panel: ModsPanel,
+) -> None:
+    panel = collections_panel
+    panel.show()
+    controller, paths, source = activate_three(panel)
+    key = controller.create("set", "Translations", paths, [])
+    source.toggle_collection_set(key)
+    items = controller.items(source)
+    child_data = items[paths[2]].data(Qt.ItemDataRole.UserRole)
+    child_data["errors"] = "Dependency error"
+    child_data["errors_warnings"] = "Dependency error"
+
+    source.summary_filter = "errors"
+    panel.signal_search_and_filters("Active", "")
+    parent = items[paths[0]]
+    assert not parent.isHidden()
+    _widget, labels = child_labels(source, parent)
+    assert len(labels) == 2
+    assert all(
+        controller.mod_name(path) in label.text()
+        for path, label in zip(paths[1:], labels)
+    )
+
+    # A set is one visible unit: the name match and the error may belong to
+    # different members of that same unit.
+    panel.active_mods_search.setText("Mod 1")
+    QApplication.processEvents()
+    assert not parent.isHidden()
+    _widget, labels = child_labels(source, parent)
+    assert len(labels) == 2
 
 
 def test_debounced_sort_uses_live_paths(collections_panel: ModsPanel) -> None:
@@ -1021,43 +1399,17 @@ def test_folder_size_result_does_not_restore_removed_rows(
     assert source.count() == len(live_paths)
 
 
-def test_create_group_uses_real_list_selection_and_saves_once(
-    collections_panel: ModsPanel,
-) -> None:
-    view = collections_panel.collections_panel
-    controller = view.controller
-    paths = list(controller.items(controller.inactive_list))
-    for path in paths[:2]:
-        controller.items(controller.inactive_list)[path].setSelected(True)
-    with patch.object(QInputDialog, "getText", return_value=(" Translations ", True)):
-        view.create_group("set")
-    group = next(iter(controller.collections.sets.values()))
-    assert group.name == "Translations"
-    assert group.members == paths[:2]
-    save = controller.settings.save
-    assert isinstance(save, MagicMock)
-    save.assert_called_once_with()
-    assert set(controller.items(controller.inactive_list)) == set(paths)
-    assert controller.active_list.paths == []
-    assert view.mode.currentIndex() == 1
-
-
 def test_dividers_are_excluded_from_group_actions_and_load_positions(
     collections_panel: ModsPanel,
 ) -> None:
-    view, key, paths = grouped_view(collections_panel)
-    controller = view.controller
+    controller, key, paths = grouped_set(collections_panel)
     controller.set_enabled(paths[:2], True)
     QApplication.processEvents()
     controller.active_list.add_divider(1, "Section")
     QApplication.processEvents()
-    view.mode.setCurrentIndex(1)
-    node = first_group(view)
-    first = node.child(0)
-    second = node.child(1)
-    assert first is not None and second is not None
-    assert first.text(2) == "#1"
-    assert second.text(2) == "#2"
+    assert controller.active_list._collection_child_summaries(key)[0][0] == (
+        f"#2 {controller.mod_name(paths[1])}"
+    )
     controller.set_enabled(controller.collections.members("set", key), False)
     QApplication.processEvents()
     assert controller.items(controller.active_list) == {}
@@ -1069,7 +1421,7 @@ def test_dividers_are_excluded_from_group_actions_and_load_positions(
 def test_batch_preserves_existing_list_update_state(
     collections_panel: ModsPanel,
 ) -> None:
-    controller = collections_panel.collections_panel.controller
+    controller = collections_panel.collections_controller
     paths = list(controller.items(controller.inactive_list))
     controller.active_list.setUpdatesEnabled(False)
     controller.set_enabled(paths[:2], True)
@@ -1079,32 +1431,10 @@ def test_batch_preserves_existing_list_update_state(
     assert controller.active_list.paths == paths[:2]
 
 
-def test_refresh_restores_multiple_selections_and_current_item(
-    collections_panel: ModsPanel,
-) -> None:
-    view, key, paths = grouped_view(collections_panel)
-    controller = view.controller
-    view.mode.setCurrentIndex(1)
-    node = first_group(view)
-    first = node.child(0)
-    second = node.child(1)
-    assert first is not None and second is not None
-    view.tree.setCurrentItem(second)
-    for item in (node, first, second):
-        item.setSelected(True)
-    controller.refresh()
-    assert {
-        item.data(0, Qt.ItemDataRole.UserRole) for item in view.tree.selectedItems()
-    } == {("set", key), ("mod", paths[0]), ("mod", paths[1])}
-    current = view.tree.currentItem()
-    assert current is not None
-    assert current.data(0, Qt.ItemDataRole.UserRole) == ("mod", paths[1])
-
-
 def test_batch_emits_one_update_per_list_and_restores_removal_handler(
     collections_panel: ModsPanel,
 ) -> None:
-    controller = collections_panel.collections_panel.controller
+    controller = collections_panel.collections_controller
     source, target = controller.inactive_list, controller.active_list
     paths = list(controller.items(source))
     source_updates = QSignalSpy(source.list_update_signal)
