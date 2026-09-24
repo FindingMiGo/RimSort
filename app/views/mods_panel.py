@@ -3555,32 +3555,11 @@ class ModListWidget(QListWidget):
 
     def apply_collection_sets(self, collections: ModCollections) -> None:
         """Render sets as compact, collapsible groups in the ordinary list."""
-        try:
-            self.model().rowsInserted.disconnect(self.handle_rows_inserted)
-        except TypeError:
-            pass
-        try:
-            self.model().rowsAboutToBeRemoved.disconnect(self.handle_rows_removed)
-        except TypeError:
-            pass
         updates_enabled = self.updatesEnabled()
         self.setUpdatesEnabled(False)
         self._visible_widget_timer.stop()
         self._visible_widget_queue.clear()
         try:
-            # Remove headers produced by the previous implementation.
-            for row in range(self.count() - 1, -1, -1):
-                item = self.item(row)
-                data = item.data(Qt.ItemDataRole.UserRole)
-                if getattr(data, "is_divider", False) and getattr(
-                    data, "collection_set_key", ""
-                ):
-                    self.takeItem(row)
-            self.paths = [
-                self.item(row).data(Qt.ItemDataRole.UserRole)["path"]
-                for row in range(self.count())
-            ]
-
             items_by_path = {
                 item.data(Qt.ItemDataRole.UserRole)["path"]: item
                 for item in self.get_all_mod_list_items()
@@ -3637,12 +3616,6 @@ class ModListWidget(QListWidget):
             for item in items_by_path.values():
                 self._update_collection_row(item)
         finally:
-            self.model().rowsInserted.connect(
-                self.handle_rows_inserted, Qt.ConnectionType.QueuedConnection
-            )
-            self.model().rowsAboutToBeRemoved.connect(
-                self.handle_rows_removed, Qt.ConnectionType.QueuedConnection
-            )
             self.setUpdatesEnabled(updates_enabled)
         self.apply_collapse_states()
         self.check_widgets_visible()
