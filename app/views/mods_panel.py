@@ -3373,6 +3373,15 @@ class ModListWidget(QListWidget):
         :param first: index of first item removed (not used)
         :param last: index of last item removed (not used)
         """
+        # Native cross-list moves remove source rows after dropEvent returns.
+        # Prune removed paths here without registering pending insertions; their
+        # queued rowsInserted handlers still own that bookkeeping.
+        remaining_paths = {
+            data["path"]
+            for row in range(self.count())
+            if (data := self.item(row).data(Qt.ItemDataRole.UserRole)) is not None
+        }
+        self.paths = [path for path in self.paths if path in remaining_paths]
         # Update list signal if all items are loaded
         if len(self.paths) == self.count():
             # Update list with the number of items
